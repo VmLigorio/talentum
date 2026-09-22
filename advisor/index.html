@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Talentum Advisor</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main id="login-view" class="login-view">
+      <section class="login-card">
+        <p class="eyebrow">talentum advisor</p>
+        <h1>Decisões melhores começam com contexto.</h1>
+        <p class="muted">Acompanhe clientes, patrimônio, metas e relatórios em um só lugar.</p>
+        <p id="api-status" class="api-status">Verificando conexão com a API...</p>
+        <form id="login-form">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" value="admin@talentum.local" required>
+          <label for="password">Senha</label>
+          <input id="password" type="password" required>
+          <p id="login-error" class="error" role="alert"></p>
+          <button class="button primary" type="submit">Entrar no Advisor</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="app-view" class="app-view hidden">
+      <header class="topbar">
+        <div class="brand">talentum<span>✦</span></div>
+        <div class="topbar-actions"><span id="current-user" class="muted"></span><button id="notifications" class="button ghost">Alertas <span id="notification-count">0</span></button><button id="manage-team" class="button ghost hidden">Equipe</button><button id="new-user" class="button ghost hidden">Novo usuário</button><button id="change-password" class="button ghost">Alterar senha</button><button id="logout" class="button ghost">Sair</button></div>
+      </header>
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="section-label">clientes</div>
+          <input id="client-search" class="client-search" type="search" placeholder="Buscar cliente">
+          <select id="client-status-filter" class="client-status-filter"><option value="all">Todos os clientes</option><option value="active">Somente ativos</option><option value="inactive">Somente inativos</option></select>
+          <button id="refresh-workspace" class="button ghost small sidebar-refresh" type="button">Atualizar lista</button>
+          <button id="open-market-research" class="button secondary small sidebar-refresh" type="button">Pesquisar investimentos</button>
+          <p id="workspace-status" class="feedback sidebar-feedback" role="status"></p>
+          <div id="client-list" class="client-list"></div>
+        </aside>
+        <section class="content">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-mark">✦</div>
+            <h2>Escolha um cliente</h2>
+            <p class="muted">Selecione alguém na lista para acompanhar sua jornada financeira.</p>
+            <div class="overview-stats"><article><span>clientes cadastrados</span><strong id="overview-client-count">0</strong></article><article><span>acessos ativos</span><strong id="overview-active-count">0</strong></article><article><span>Advisors ativos</span><strong id="overview-advisor-count">0</strong></article></div>
+          </div>
+          <div id="market-view" class="hidden">
+            <div class="page-heading">
+              <div><p class="eyebrow">pesquisa de mercado</p><h1>Investimentos</h1><p class="muted">Consulte ativos da B3 e do mercado internacional para apoiar sua análise.</p></div>
+            </div>
+            <section class="panel market-search-panel">
+              <form id="market-search-form" class="market-search-form">
+                <label>Ativo, ticker ou nome<input id="market-query" maxlength="64" placeholder="Ex.: PETR4, VALE3, Apple ou AAPL" required></label>
+                <label>Mercado<select id="market-region"><option value="all">Brasil e exterior</option><option value="br">Brasil — B3</option><option value="global">Exterior</option></select></label>
+                <button id="market-search-button" class="button primary" type="submit">Pesquisar</button>
+              </form>
+              <p class="market-disclaimer">Dados de mercado são informativos, podem ter atraso e não constituem recomendação de investimento.</p>
+              <p id="market-status" class="feedback" role="status"></p>
+            </section>
+            <section class="panel market-alert-panel">
+              <div class="panel-heading"><div><p class="eyebrow">alerta de preço</p><h2>Monitorar um ativo</h2></div><span class="muted">notificação ao atingir o alvo</span></div>
+              <form id="market-alert-form" class="market-alert-form">
+                <label>Cliente<select id="market-alert-client" required></select></label>
+                <label>Ticker<input id="market-alert-symbol" maxlength="32" placeholder="Ex.: PETR4 ou AAPL" required></label>
+                <label>Mercado<select id="market-alert-market"><option value="br">Brasil — B3</option><option value="global">Exterior</option></select></label>
+                <label>Preço-alvo<input id="market-alert-target" type="number" min="0.000001" step="0.000001" placeholder="Ex.: 32,50" required></label>
+                <label>Condição<select id="market-alert-condition"><option value="at_or_below">Atingir ou ficar abaixo</option><option value="at_or_above">Atingir ou superar</option></select></label>
+                <div class="market-alert-form-actions"><button id="market-alert-submit" class="button secondary" type="submit">Criar alerta</button><button id="market-alert-cancel-edit" class="button ghost hidden" type="button">Cancelar edição</button></div>
+              </form>
+              <p id="market-alert-status" class="feedback"></p>
+              <div id="market-alert-list" class="market-alert-list"><p class="empty-line">Selecione um cliente para ver os alertas.</p></div>
+            </section>
+            <section class="panel market-watchlist-panel">
+              <div class="panel-heading"><div><p class="eyebrow">lista de acompanhamento</p><h2>Ativos monitorados</h2></div><span class="muted">acesso rápido por cliente</span></div>
+              <form id="market-watchlist-form" class="market-watchlist-form">
+                <label>Cliente<select id="market-watchlist-client" required></select></label>
+                <label>Ticker<input id="market-watchlist-symbol" maxlength="32" placeholder="Ex.: PETR4 ou AAPL" required></label>
+                <label>Mercado<select id="market-watchlist-market"><option value="br">Brasil — B3</option><option value="global">Exterior</option></select></label>
+                <button id="market-watchlist-submit" class="button secondary" type="submit">Adicionar ativo</button>
+              </form>
+              <p id="market-watchlist-status" class="feedback"></p>
+              <div id="market-watchlist-list" class="market-watchlist-list"><p class="empty-line">Selecione um cliente para ver os ativos acompanhados.</p></div>
+            </section>
+            <section class="panel market-results-panel"><div class="panel-heading"><div><p class="eyebrow">resultado da busca</p><h2>Ativos encontrados</h2></div><span id="market-updated" class="muted"></span></div><div id="market-filter-controls" class="market-filter-controls hidden"><label>Tipo<select id="market-type-filter"><option value="all">Todos</option></select></label><label>Setor<select id="market-sector-filter"><option value="all">Todos</option></select></label><label>Ordenar por<select id="market-sort"><option value="relevance">Relevância</option><option value="price_desc">Maior preço</option><option value="change_desc">Maior variação</option><option value="volume_desc">Maior volume</option><option value="market_cap_desc">Maior valor de mercado</option><option value="dividend_yield_desc">Maior dividend yield</option></select></label></div><div id="market-warnings" class="market-warnings"></div><div id="market-compare-toolbar" class="market-compare-toolbar hidden"><span id="market-compare-count">Selecione ativos para comparar.</span><div><select id="market-compare-period" aria-label="Período da comparação"><option value="1mo">1 mês</option><option value="3mo">3 meses</option><option value="6mo">6 meses</option><option value="1y" selected>1 ano</option><option value="5y">5 anos</option></select><button id="market-compare-button" class="button secondary small" type="button">Comparar selecionados</button></div></div><div id="market-results" class="market-results"><p class="empty-line">Digite um ticker ou nome para pesquisar.</p></div><section id="market-compare-panel" class="market-compare-panel hidden"><div class="panel-heading"><div><p class="eyebrow">comparação histórica</p><h2>Desempenho relativo</h2></div><div class="market-compare-actions"><button id="market-export-button" class="button secondary small" type="button">Exportar análise</button><button id="market-compare-close" class="button ghost small" type="button">Fechar</button></div></div><div id="market-compare-status" class="feedback"></div><div id="market-compare-chart"></div></section></section>
+          </div>
+          <div id="client-view" class="hidden">
+            <div class="page-heading">
+              <div><p class="eyebrow">visão do cliente</p><h1 id="client-name"></h1><p id="client-email" class="muted"></p></div>
+              <span id="client-status" class="status"></span>
+            </div>
+            <section class="stats-grid">
+              <article class="stat-card"><span>patrimônio total</span><strong id="patrimony-total">R$ 0,00</strong></article>
+              <article class="stat-card"><span>renda mensal</span><strong id="monthly-income-total">R$ 0,00</strong></article>
+              <article class="stat-card"><span>despesas mensais</span><strong id="monthly-expenses-total">R$ 0,00</strong></article>
+              <article class="stat-card"><span>saldo mensal estimado</span><strong id="monthly-balance-total">R$ 0,00</strong></article>
+              <article class="stat-card"><span>metas ativas</span><strong id="goals-count">0</strong></article>
+              <article class="stat-card"><span>relatórios publicados</span><strong id="reports-count">0</strong></article>
+              <article class="stat-card"><span>ações pendentes</span><strong id="actions-pending-count">0</strong></article>
+              <article class="stat-card"><span>ações atrasadas</span><strong id="actions-overdue-count">0</strong></article>
+            </section>
+            <section class="panel investment-portfolio-panel">
+              <div class="panel-heading"><div><p class="eyebrow">carteira</p><h2>Carteira de investimentos</h2></div><span class="muted">posição consolidada do cliente</span></div>
+              <div id="investment-portfolio-summary" class="investment-portfolio-summary"><div><small class="muted">Valor investido</small><strong id="investment-invested-total">R$ 0,00</strong></div><div><small class="muted">Valor atualizado</small><strong id="investment-current-total">R$ 0,00</strong></div><div><small class="muted">Resultado</small><strong id="investment-pnl-total">R$ 0,00</strong></div><div><small class="muted">Posições</small><strong id="investment-position-count">0</strong></div></div>
+              <div id="investment-currency-totals" class="investment-currency-totals"></div>
+              <div id="investment-allocations" class="investment-allocations"></div>
+              <form id="investment-position-form" class="investment-position-form">
+                <label>Ticker<input id="investment-symbol" maxlength="32" placeholder="Ex.: PETR4 ou AAPL" required></label>
+                <label>Mercado<select id="investment-market"><option value="br">Brasil — B3</option><option value="global">Exterior</option></select></label>
+                <label>Quantidade<input id="investment-quantity" type="number" min="0.00000001" step="0.00000001" placeholder="Ex.: 100" required></label>
+                <label>Preço médio<input id="investment-average-price" type="number" min="0.00000001" step="0.00000001" placeholder="Ex.: 32,50" required></label>
+                <label>Instituição<input id="investment-institution" maxlength="120" placeholder="Ex.: Corretora" ></label>
+                <label class="investment-notes-field">Observações<input id="investment-notes" maxlength="500" placeholder="Observação interna (opcional)"></label>
+                <div class="investment-position-form-actions"><button id="investment-position-submit" class="button secondary" type="submit">Adicionar posição</button><button id="investment-position-cancel" class="button ghost hidden" type="button">Cancelar</button></div>
+              </form>
+              <p id="investment-position-status" class="feedback"></p>
+              <div id="investment-position-list" class="investment-position-list"><p class="empty-line">Nenhuma posição cadastrada.</p></div>
+            </section>
+            <section class="panel investment-analytics-panel">
+              <div class="panel-heading"><div><p class="eyebrow">análise avançada</p><h2>Desempenho da carteira</h2></div><div class="investment-analytics-controls"><select id="investment-analytics-period" aria-label="Período da análise"><option value="1mo">1 mês</option><option value="3mo">3 meses</option><option value="6mo">6 meses</option><option value="1y" selected>1 ano</option><option value="5y">5 anos</option></select><button id="investment-analytics-load" class="button secondary small" type="button">Calcular análise</button><button id="investment-analytics-export" class="button ghost small" type="button" disabled>Exportar</button></div></div>
+              <p id="investment-analytics-status" class="feedback">Escolha um período e carregue a análise histórica.</p>
+              <div id="investment-analytics-summary" class="investment-analytics-summary"></div>
+              <div id="investment-analytics-flags" class="investment-analytics-flags"></div>
+              <div id="investment-analytics-list" class="investment-analytics-list"></div>
+            </section>
+            <section class="panel investment-history-panel">
+              <div class="panel-heading"><div><p class="eyebrow">acompanhamento contínuo</p><h2>Evolução da carteira</h2></div><div class="investment-analytics-controls"><select id="investment-history-currency" aria-label="Moeda do histórico"><option value="">Todas as moedas</option></select><button id="investment-history-load" class="button secondary small" type="button">Atualizar histórico</button><button id="investment-history-capture" class="button ghost small" type="button">Capturar agora</button></div></div>
+              <p id="investment-history-status" class="feedback">Os registros automáticos aparecerão aqui após a primeira captura.</p>
+              <div id="investment-history-summary" class="investment-analytics-summary"></div>
+              <div id="investment-history-list" class="investment-history-list"></div>
+            </section>
+            <section class="panel financial-panel"><div class="panel-heading"><div><p class="eyebrow">contexto financeiro</p><h2>Perfil financeiro</h2></div><button id="save-financial-profile" class="button primary small">Salvar</button></div><form id="financial-form" class="financial-form"><div class="financial-fields"><label>Renda mensal<input id="monthly-income" type="number" min="0" step="0.01" required></label><label>Despesas mensais<input id="monthly-expenses" type="number" min="0" step="0.01" required></label><label>Perfil de risco<input id="risk-profile" maxlength="30" placeholder="Ex.: moderado"></label></div><p id="financial-status" class="feedback"></p></form></section>
+              <section class="panel profile-panel"><div class="panel-heading"><div><p class="eyebrow">cadastro</p><h2>Dados do cliente</h2></div><button id="save-client-profile" class="button primary small">Salvar</button></div><form id="client-profile-form" class="financial-form"><div class="financial-fields"><label>Nome<input id="client-profile-name" maxlength="120" required></label><label>Telefone<input id="client-profile-phone" maxlength="30" placeholder="(00) 00000-0000"></label><label>Status<input id="client-profile-status" disabled></label></div><div class="financial-fields"><label>Nome do pai<input id="client-profile-father" maxlength="120"></label><label>Nome da mãe<input id="client-profile-mother" maxlength="120"></label></div><div class="financial-fields"><label>Rua<input id="client-profile-street" maxlength="160"></label><label>Número<input id="client-profile-number" maxlength="30"></label><label>Cidade<input id="client-profile-city" maxlength="100"></label><label>CEP<input id="client-profile-zip" maxlength="20"></label><label>Estado<input id="client-profile-state" maxlength="60"></label></div><p id="client-profile-status-message" class="feedback"></p></form></section>
+            <section id="assignment-panel" class="panel profile-panel hidden"><div class="panel-heading"><div><p class="eyebrow">operação</p><h2>Advisor responsável</h2></div><button id="save-assignment" class="button primary small">Salvar</button></div><form id="assignment-form" class="financial-form"><label>Advisor<select id="advisor-assignment"><option value="">Sem Advisor vinculado</option></select></label><button id="toggle-client-access" class="button ghost" type="button">Desativar acesso</button><button id="reset-client-password" class="button ghost" type="button">Redefinir senha do cliente</button><p id="assignment-status" class="feedback"></p></form></section>
+            <div class="two-column">
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">distribuição</p><h2>Patrimônio por categoria</h2></div></div><div id="categories" class="category-list"></div></section>
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">objetivos</p><h2>Progresso das metas</h2></div></div><div id="goals" class="goal-list"></div></section>
+            </div>
+            <div class="two-column lower-grid">
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">lançamento</p><h2 id="advisor-patrimony-form-title">Adicionar patrimônio</h2></div></div><form id="advisor-patrimony-form" class="report-form"><input id="advisor-patrimony-category" placeholder="Categoria" required><input id="advisor-patrimony-description" placeholder="Descrição" required><input id="advisor-patrimony-institution" placeholder="Instituição (opcional)"><input id="advisor-patrimony-value" type="number" min="0" step="0.01" placeholder="Valor" required><textarea id="advisor-patrimony-notes" rows="2" maxlength="500" placeholder="Observações (opcional)"></textarea><div class="report-form-actions"><button id="advisor-patrimony-submit" class="button secondary" type="submit">Adicionar patrimônio</button><button id="advisor-patrimony-cancel" class="button ghost hidden" type="button">Cancelar</button></div><p id="advisor-patrimony-status" class="feedback"></p></form><div id="advisor-patrimony-list" class="quick-record-list"></div></section>
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">planejamento</p><h2 id="advisor-goal-form-title">Adicionar meta</h2></div><select id="goal-filter" class="report-filter"><option value="all">Todas</option><option value="active">Ativas</option><option value="paused">Pausadas</option><option value="completed">Concluídas</option><option value="overdue">Prazo vencido</option></select></div><form id="advisor-goal-form" class="report-form"><input id="advisor-goal-title" placeholder="Título da meta" required><input id="advisor-goal-target" type="number" min="0.01" step="0.01" placeholder="Valor-alvo" required><input id="advisor-goal-current" type="number" min="0" step="0.01" placeholder="Valor atual (opcional)" value="0"><div class="date-row"><input id="advisor-goal-date" type="date"><select id="advisor-goal-status-select"><option value="active">Ativa</option><option value="paused">Pausada</option><option value="completed">Concluída</option></select></div><div class="report-form-actions"><button id="advisor-goal-submit" class="button secondary" type="submit">Adicionar meta</button><button id="advisor-goal-cancel" class="button ghost hidden" type="button">Cancelar</button></div><p id="advisor-goal-status" class="feedback"></p></form><div id="advisor-goal-list" class="quick-record-list"></div></section>
+            </div>
+            <div class="two-column lower-grid">
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">acesso do cliente</p><h2>Permissões</h2></div><button id="save-permissions" class="button primary small">Salvar</button></div><div id="permissions" class="permission-list"></div><p id="permission-status" class="feedback"></p></section>
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">documento</p><h2 id="report-form-title">Publicar relatório</h2></div></div><form id="report-form" class="report-form"><input id="report-title" placeholder="Título do relatório" required><div class="date-row"><input id="period-start" type="date" required><input id="period-end" type="date" required></div><textarea id="report-summary" rows="4" placeholder="Resumo para o cliente" required></textarea><label>Status<select id="report-status-select"><option value="published">Publicado</option><option value="draft">Rascunho</option></select></label><div class="report-form-actions"><button id="report-submit-button" class="button secondary" type="submit">Publicar relatório</button><button id="cancel-report-edit" class="button ghost hidden" type="button">Cancelar edição</button></div><p id="report-status" class="feedback"></p></form></section>
+            </div>
+            <section class="panel report-history-panel"><div class="panel-heading"><div><p class="eyebrow">histórico</p><h2>Relatórios do cliente</h2></div><select id="report-filter" class="report-filter"><option value="all">Todos</option><option value="published">Publicados</option><option value="draft">Rascunhos</option></select></div><div id="reports-list" class="report-list"></div></section>
+            <section class="panel report-history-panel"><div class="panel-heading"><div><p class="eyebrow">arquivo seguro</p><h2>Documentos do cliente</h2></div><span class="muted">até 10 MB</span></div><form id="document-form" class="report-form"><input id="document-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" required><select id="document-kind"><option value="income_proof">Comprovante de renda</option><option value="address_proof">Comprovante de endereço</option><option value="other">Outro documento</option></select><input id="document-description" maxlength="500" placeholder="Descrição (opcional)"><div class="report-form-actions"><button class="button secondary" type="submit">Enviar documento</button></div><p id="document-status" class="feedback"></p></form><div id="documents-list" class="quick-record-list"></div></section>
+            <section class="panel report-history-panel action-plan-panel"><div class="panel-heading"><div><p class="eyebrow">acompanhamento</p><h2 id="action-form-title">Plano de ação</h2></div><select id="action-filter" class="report-filter"><option value="all">Todas</option><option value="pending">Pendentes</option><option value="completed">Concluídas</option><option value="overdue">Atrasadas</option></select></div><form id="action-form" class="report-form"><input id="action-title" placeholder="Título da ação" required><textarea id="action-description" rows="3" placeholder="Orientação ou próximo passo (opcional)"></textarea><div class="date-row"><input id="action-due-date" type="date"><select id="action-goal"><option value="">Sem meta vinculada</option></select></div><div class="date-row"><select id="action-priority"><option value="low">Prioridade baixa</option><option value="medium" selected>Prioridade média</option><option value="high">Prioridade alta</option></select><select id="action-status"><option value="planned">Planejada</option><option value="in_progress">Em andamento</option><option value="completed">Concluída</option></select></div><div class="report-form-actions"><button id="action-submit" class="button secondary" type="submit">Adicionar ação</button><button id="action-cancel" class="button ghost hidden" type="button">Cancelar</button></div><p id="action-feedback" class="feedback"></p></form><div id="action-list" class="quick-record-list"></div></section>
+            <section class="panel report-history-panel"><div class="panel-heading"><div><p class="eyebrow">segurança e rastreabilidade</p><h2>Histórico de alterações</h2></div></div><div id="audit-list" class="audit-list"></div></section>
+          </div>
+        </section>
+      </div>
+    </main>
+    <dialog id="user-dialog" class="password-dialog"><form id="user-form"><div class="panel-heading"><div><p class="eyebrow">onboarding</p><h2>Novo usuário</h2></div><button id="close-user" class="button ghost" type="button">Fechar</button></div><label>Nome<input id="new-user-name" maxlength="120" required></label><label>E-mail<input id="new-user-email" type="email" maxlength="255" required></label><label>Perfil<select id="new-user-role"><option value="client">Cliente</option><option value="advisor">Advisor</option></select></label><label>Senha inicial<input id="new-user-password" type="password" minlength="8" required></label><label>Confirmar senha<input id="new-user-confirm" type="password" minlength="8" required></label><button class="button primary" type="submit">Criar usuário</button><p id="user-status" class="feedback"></p></form></dialog>
+    <dialog id="team-dialog" class="password-dialog team-dialog"><div class="panel-heading"><div><p class="eyebrow">administração</p><h2>Equipe de Advisors</h2></div><button id="close-team" class="button ghost" type="button">Fechar</button></div><div id="team-list" class="team-list"></div></dialog>
+            <dialog id="notifications-dialog" class="password-dialog notifications-dialog"><div class="panel-heading"><div><p class="eyebrow">acompanhamento</p><h2>Alertas</h2></div><button id="close-notifications" class="button ghost" type="button">Fechar</button></div><div class="notification-filters"><select id="notification-type-filter"><option value="all">Todos os tipos</option><option value="action_overdue">Ações atrasadas</option><option value="action_due_soon">Ações próximas do prazo</option><option value="goal_overdue">Metas vencidas</option><option value="goal_due_soon">Metas próximas do prazo</option><option value="document_uploaded">Documentos novos</option><option value="document_review_due">Atualização anual de documentos</option><option value="market_price_alert">Alertas de preço</option></select><select id="notification-read-filter"><option value="all">Todos</option><option value="unread">Não lidos</option><option value="read">Lidos</option></select></div><div class="notification-preferences"><p class="eyebrow">preferências</p><label><input type="checkbox" data-notification-preference="action_overdue"> Ações atrasadas</label><label><input type="checkbox" data-notification-preference="action_due_soon"> Ações próximas do prazo</label><label><input type="checkbox" data-notification-preference="goal_overdue"> Metas vencidas</label><label><input type="checkbox" data-notification-preference="goal_due_soon"> Metas próximas do prazo</label><label><input type="checkbox" data-notification-preference="document_uploaded"> Documentos novos</label><label><input type="checkbox" data-notification-preference="document_review_due"> Atualização anual de documentos</label><label><input type="checkbox" data-notification-preference="market_price_alert"> Alertas de preço</label><button id="save-notification-preferences" class="button secondary small" type="button">Salvar preferências</button><p id="notification-preference-status" class="feedback"></p></div><div class="notification-actions"><button id="mark-all-notifications" class="button ghost small" type="button">Marcar todas como lidas</button></div><div id="notifications-list" class="notification-list"></div></dialog>
+    <dialog id="password-dialog" class="password-dialog"><form id="password-form"><div class="panel-heading"><div><p class="eyebrow">segurança</p><h2>Alterar senha</h2></div><button id="close-password" class="button ghost" type="button">Fechar</button></div><label>Senha atual<input id="current-password" type="password" minlength="8" required></label><label>Nova senha<input id="new-password" type="password" minlength="8" required></label><label>Confirmar nova senha<input id="confirm-password" type="password" minlength="8" required></label><button class="button primary" type="submit">Alterar senha</button><p id="password-status" class="feedback"></p></form></dialog>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: talentum-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: talentum
+      POSTGRES_USER: talentum_user
+      POSTGRES_PASSWORD: talentum_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - talentum_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U talentum_user -d talentum"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: talentum-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - talentum_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:1.4.6
+    container_name: talentum-clamav
+    restart: unless-stopped
+    volumes:
+      - talentum_clamavdata:/var/lib/clamav
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://talentum_user:talentum_dev_password@postgres:5432/talentum
+      ENVIRONMENT: development
+      JWT_SECRET: change-this-development-secret-before-production
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 14
+      CORS_ORIGINS: http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:8080,http://localhost:8080
+      BRAPI_BASE_URL: https://brapi.dev
+      BRAPI_TOKEN: ${BRAPI_TOKEN:-}
+      YAHOO_FINANCE_BASE_URL: https://query1.finance.yahoo.com
+      MARKET_DATA_TIMEOUT_SECONDS: 8
+      MARKET_RETRY_ATTEMPTS: 1
+      MARKET_CACHE_TTL_SECONDS: 60
+      MARKET_ALERT_CHECK_INTERVAL_SECONDS: 300
+      PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS: 3600
+      API_DOCS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      REDIS_REQUIRED: "false"
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      CLAMAV_REQUIRED: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  talentum_pgdata:
+  talentum_redisdata:
+  talentum_clamavdata:

@@ -1,0 +1,13 @@
+alembic
+argon2-cffi
+fastapi
+python-multipart
+httpx
+psycopg[binary]
+pydantic-settings
+PyJWT
+redis>=5,<7
+pytest
+python-dotenv
+sqlalchemy
+uvicorn[standard]
