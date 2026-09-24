@@ -1,3 +1,6 @@
+# Talentum — backend/app/services/market_data.py
+# Responsabilidade: Concentra regras de negócio e integrações reutilizáveis, mantendo as rotas mais simples.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime, timezone
 from threading import RLock
 from time import monotonic
@@ -50,6 +53,7 @@ class _MarketCache:
 _market_cache = _MarketCache()
 
 
+# Limpa o cache compartilhado para testes ou para uma atualização controlada.
 def clear_market_cache() -> None:
     """Clear cached provider responses, primarily for tests and controlled refreshes."""
 
@@ -68,6 +72,7 @@ class MarketDataService:
         self.retry_attempts = settings.market_retry_attempts
         self.cache_ttl_seconds = settings.market_cache_ttl_seconds
 
+    # Pesquisa combina provedores por mercado e deduplica os resultados antes de responder.
     def search(self, query: str, market: MarketRegion) -> tuple[list[MarketInstrument], list[str]]:
         normalized_query = query.strip().casefold()
         cache_key = ("search", market, normalized_query)
@@ -96,6 +101,7 @@ class MarketDataService:
             _market_cache.set(cache_key, value, self.cache_ttl_seconds)
         return value
 
+    # Detalhes usam o provedor adequado e mantêm o último resultado em cache.
     def details(self, symbol: str, market: MarketRegion) -> MarketInstrument:
         normalized = symbol.strip().upper()
         if not normalized:
@@ -113,6 +119,7 @@ class MarketDataService:
         _market_cache.set(cache_key, result, self.cache_ttl_seconds)
         return result
 
+    # Histórico delega a fonte por mercado e devolve uma série normalizada.
     def history(self, symbol: str, market: MarketRegion, period: MarketPeriod) -> MarketHistoryResponse:
         normalized = symbol.strip().upper()
         if not normalized:
@@ -130,6 +137,7 @@ class MarketDataService:
         _market_cache.set(cache_key, result, self.cache_ttl_seconds)
         return result
 
+    # Cria clientes HTTP com timeout, retry e autenticação opcional do Brapi.
     def _client(self) -> httpx.Client:
         headers = {"Accept": "application/json", "User-Agent": "Talentum/0.1"}
         if self.brapi_token:
@@ -142,6 +150,7 @@ class MarketDataService:
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
         )
 
+    # Brasil prioriza cotação exata e usa a lista da Brapi para busca por nome.
     def _search_brazil(self, query: str) -> list[MarketInstrument]:
         normalized = query.strip().upper()
         if not normalized:
@@ -195,6 +204,7 @@ class MarketDataService:
             ).casefold()
         ][:15]
 
+    # Busca cotação e indicadores brasileiros, mantendo uma resposta útil sem módulos premium.
     def _brazil_details(self, symbol: str) -> MarketInstrument:
         quote_symbol = {"IBOV": "^BVSP", "IBOVESPA": "^BVSP"}.get(symbol, symbol)
         with self._client() as client:
@@ -263,6 +273,7 @@ class MarketDataService:
                 raise ValueError(f"Ativo {symbol} não encontrado")
             return item
 
+    # A fonte internacional fornece os dados globais por símbolo.
     def _global_details(self, symbol: str) -> MarketInstrument:
         with self._client() as client:
             response = client.get(
@@ -277,6 +288,7 @@ class MarketDataService:
                 raise ValueError(f"Ativo {symbol} não encontrado")
             return self._enrich_yahoo_item(client, match)
 
+    # O histórico brasileiro tenta Brapi e usa Yahoo como fallback de compatibilidade.
     def _brazil_history(self, symbol: str, period: MarketPeriod) -> MarketHistoryResponse:
         quote_symbol = {"IBOV": "^BVSP", "IBOVESPA": "^BVSP"}.get(symbol, symbol)
         with self._client() as client:
@@ -316,6 +328,7 @@ class MarketDataService:
             return symbol
         return f"{symbol}.SA"
 
+    # Histórico internacional é obtido diretamente do endpoint de gráficos do Yahoo.
     def _global_history(self, symbol: str, period: MarketPeriod) -> MarketHistoryResponse:
         with self._client() as client:
             points, currency = self._fetch_yahoo_history(client, symbol, period)
@@ -338,6 +351,7 @@ class MarketDataService:
             source="yahoo_finance",
         )
 
+    # Normaliza o formato de série retornado pela Brapi.
     def _fetch_brapi_history(
         self,
         client: httpx.Client,
@@ -374,6 +388,7 @@ class MarketDataService:
         currency = item.get("currency") or data.get("currency")
         return points, currency
 
+    # Normaliza o formato de série retornado pelo Yahoo Finance.
     def _fetch_yahoo_history(
         self,
         client: httpx.Client,
@@ -409,6 +424,7 @@ class MarketDataService:
             )
         return rows, result.get("meta", {}).get("currency")
 
+    # A busca global usa o endpoint de pesquisa para descobrir empresas e ETFs.
     def _search_global(self, query: str) -> list[MarketInstrument]:
         with self._client() as client:
             response = client.get(
@@ -450,6 +466,7 @@ class MarketDataService:
             return results
 
     @staticmethod
+    # Converte o payload de cotação da Brapi para o schema interno da aplicação.
     def _brapi_item(item: dict[str, Any]) -> MarketInstrument:
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
         statistics = item.get("defaultKeyStatistics") if isinstance(item.get("defaultKeyStatistics"), dict) else {}
@@ -485,6 +502,7 @@ class MarketDataService:
         )
 
     @staticmethod
+    # Acrescenta indicadores de fundos imobiliários sem perder a cotação base.
     def _merge_fii_details(item: MarketInstrument, fii: dict[str, Any]) -> MarketInstrument:
         return item.model_copy(
             update={
@@ -504,6 +522,7 @@ class MarketDataService:
             }
         )
 
+    # Tenta obter o relatório estruturado do FII quando o provedor o disponibiliza.
     def _load_fii_report(self, client: httpx.Client, symbol: str) -> FiiReportSummary | None:
         response = client.get(
             f"{self.brapi_base_url}/api/v2/fii/reports",
@@ -542,6 +561,7 @@ class MarketDataService:
         )
 
     @staticmethod
+    # Converte resultados de busca do Yahoo para o modelo usado pela interface.
     def _yahoo_item(item: dict[str, Any]) -> MarketInstrument:
         return MarketInstrument(
             market="global",
@@ -570,6 +590,7 @@ class MarketDataService:
             source="yahoo_finance",
         )
 
+    # Enriquece um resultado global com métricas adicionais disponíveis no Yahoo.
     def _enrich_yahoo_item(self, client: httpx.Client, item: dict[str, Any]) -> MarketInstrument:
         symbol = str(item.get("symbol", ""))
         response = client.get(
@@ -583,6 +604,7 @@ class MarketDataService:
                 return self._yahoo_item({**item, **results[0]})
         return self._enrich_yahoo_chart(client, self._yahoo_item(item))
 
+    # Preenche detalhes usando o endpoint de gráfico quando a cotação é incompleta.
     def _enrich_yahoo_chart(self, client: httpx.Client, item: MarketInstrument) -> MarketInstrument:
         if not item.symbol:
             return item
@@ -621,11 +643,13 @@ class MarketDataService:
         )
 
     @staticmethod
+    # Remove detalhes técnicos da exceção antes de mostrá-la ao usuário.
     def _safe_error(error: Exception) -> str:
         message = str(error).strip()
         return message[:120] if message else "falha de comunicação"
 
 
+# Funções abaixo convertem valores externos e calculam indicadores derivados.
 def _number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None

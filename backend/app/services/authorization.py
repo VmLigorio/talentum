@@ -1,3 +1,6 @@
+# Talentum — backend/app/services/authorization.py
+# Responsabilidade: Concentra regras de negócio e integrações reutilizáveis, mantendo as rotas mais simples.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status

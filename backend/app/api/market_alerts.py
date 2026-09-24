@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/market_alerts.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status

@@ -1,3 +1,6 @@
+// Talentum — mobile/lib/main.dart
+// Responsabilidade: Implementa a interface Flutter, os fluxos de autenticação e as funcionalidades do cliente.
+// Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import 'dart:convert';
 import 'dart:io' show File, Platform;
 import 'dart:typed_data';
@@ -9,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 
+// Converte entradas numéricas digitadas no padrão brasileiro para double.
 double? parseBrazilianNumber(String value) {
   final sanitized = value.trim().replaceAll(RegExp(r'[^0-9,.-]'), '');
   if (sanitized.isEmpty) return null;
@@ -18,6 +22,7 @@ double? parseBrazilianNumber(String value) {
   return double.tryParse(normalized);
 }
 
+// Formata valores com separador de milhares e casas decimais no padrão pt-BR.
 String formatBrazilianNumber(dynamic value, {int fractionDigits = 2}) {
   final parsed = value is num
       ? value.toDouble()
@@ -39,6 +44,7 @@ String formatBrazilianNumber(dynamic value, {int fractionDigits = 2}) {
 
 const biometricEnabledKey = 'talentum_biometric_enabled';
 
+// Consulta os recursos biométricos disponíveis antes de exibir ações de login.
 Future<bool> deviceSupportsBiometrics() async {
   try {
     final authentication = LocalAuthentication();
@@ -49,7 +55,9 @@ Future<bool> deviceSupportsBiometrics() async {
   }
 }
 
+// Mantém a tradução dos tipos internos de documento para os rótulos da interface.
 String documentKindLabel(dynamic kind) => switch (kind?.toString()) {
+      'identification' => 'Identificação',
       'income_proof' => 'Comprovante de renda',
       'address_proof' => 'Comprovante de endereço',
       _ => 'Outro documento',
@@ -62,6 +70,7 @@ final apiUrl = configuredApiUrl.isNotEmpty
         ? 'http://10.0.2.2:8000'
         : 'http://127.0.0.1:8000';
 
+// Inicializa preferências, restaura a sessão segura e monta a árvore Flutter.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final preferences = await SharedPreferences.getInstance();
@@ -73,6 +82,7 @@ Future<void> main() async {
   runApp(TalentumApp(api: api));
 }
 
+// Tema e ponto de entrada visual compartilhado por todas as telas do aplicativo.
 class TalentumApp extends StatelessWidget {
   const TalentumApp({super.key, required this.api});
 
@@ -96,6 +106,7 @@ class TalentumApp extends StatelessWidget {
   }
 }
 
+// Tela inicial: autenticação por senha e, quando habilitada, biometria.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.api, this.message});
 
@@ -123,6 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _loadBiometricStatus();
   }
 
+  // Carrega a preferência local sem assumir que a sessão ainda está válida.
   Future<void> _loadBiometricStatus() async {
     final enabled =
         widget.api.preferences.getBool(biometricEnabledKey) ?? false;
@@ -142,6 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  // Valida os campos, autentica na API e navega para a área do cliente.
   Future<void> submit() async {
     if (loading) return;
     final normalizedEmail = email.text.trim();
@@ -172,6 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Desbloqueia uma sessão salva usando a biometria do dispositivo.
   Future<void> submitWithBiometrics() async {
     if (loading || !biometricAvailable || !widget.api.hasStoredSession) return;
     setState(() {
@@ -290,6 +304,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+// Área autenticada do cliente: carrega dados, controla abas e edita recursos.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.api});
 
@@ -300,6 +315,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Preferências e cache local permitem preservar a experiência em falhas temporárias.
   static const hideValuesKey = 'talentum_hide_values';
   static const clientCacheKey = 'talentum_client_cache';
   static const defaultNotificationPreferences = <String, dynamic>{
@@ -329,6 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? financialProfile;
   Map<String, dynamic>? clientProfile;
   Map<String, dynamic>? permissions;
+  Map<String, dynamic>? suitability;
   String? error;
   bool loading = false;
   bool documentBusy = false;
@@ -336,6 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool biometricEnabled = false;
   String? cachedAt;
 
+  // Carrega preferências e dispara a leitura inicial dos dados protegidos.
   @override
   void initState() {
     super.initState();
@@ -388,6 +406,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Busca o usuário e os módulos independentes em paralelo para reduzir a espera.
   Future<void> load() async {
     if (loading) return;
     if (mounted) setState(() => loading = true);
@@ -439,7 +458,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       final alerts = await _loadMarketAlerts();
       if (mounted) setState(() => marketAlerts = alerts);
-      await _saveClientCache(currentUser, results);
+      final currentSuitability = await _loadSuitability();
+      if (mounted) setState(() => suitability = currentSuitability);
+      await _saveClientCache(currentUser, results, currentSuitability);
     } on ApiException catch (exception) {
       if (widget.api.accessToken == null) {
         await widget.api.secureStorage.delete(clientCacheKey);
@@ -511,8 +532,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<Map<String, dynamic>?> _loadSuitability() async {
+    try {
+      return await widget.api.suitability();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _saveClientCache(
-      Map<String, dynamic> currentUser, List<dynamic> results) async {
+      Map<String, dynamic> currentUser,
+      List<dynamic> results,
+      Map<String, dynamic>? currentSuitability) async {
     try {
       await widget.api.secureStorage.write(
           clientCacheKey,
@@ -531,6 +562,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'notifications': results[10],
             'notification_preferences': results[11],
             'market_alerts': marketAlerts,
+            'suitability': currentSuitability,
             'cached_at': DateTime.now().toIso8601String(),
           }));
     } catch (_) {
@@ -571,6 +603,9 @@ class _HomeScreenState extends State<HomeScreen> {
         notificationPreferences = Map<String, dynamic>.from(
             payload['notification_preferences'] as Map? ??
                 defaultNotificationPreferences);
+        suitability = payload['suitability'] == null
+            ? null
+            : Map<String, dynamic>.from(payload['suitability'] as Map);
         cachedAt = payload['cached_at']?.toString();
       });
       return true;
@@ -579,6 +614,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Formatações e rótulos abaixo isolam regras de apresentação dos widgets.
   String money(dynamic value) => 'R\$ ${formatBrazilianNumber(value)}';
 
   String alertPrice(Map<String, dynamic> alert) {
@@ -671,6 +707,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return endOfDueDay.isBefore(DateTime.now());
   }
 
+  // A ordenação mantém pendências e vencimentos mais importantes no topo.
   List<dynamic> orderedActionPlan() {
     final actions = List<dynamic>.from(actionPlan);
     const priorityOrder = {'high': 0, 'medium': 1, 'low': 2};
@@ -740,11 +777,13 @@ class _HomeScreenState extends State<HomeScreen> {
         _ => Icons.radio_button_unchecked,
       };
 
+  // Alterna a ocultação de valores sensíveis apenas na interface local.
   Future<void> toggleValueVisibility() async {
     setState(() => hideValues = !hideValues);
     await widget.api.preferences.setBool(hideValuesKey, hideValues);
   }
 
+  // Constrói a navegação principal e escolhe a aba atualmente selecionada.
   @override
   Widget build(BuildContext context) {
     final labels = [
@@ -844,6 +883,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Seleciona o conteúdo da aba sem duplicar a estrutura do scaffold principal.
   Widget _content() {
     if (tab == 1) return _patrimonyView();
     if (tab == 2) return _goalsView();
@@ -931,6 +971,8 @@ class _HomeScreenState extends State<HomeScreen> {
       const SizedBox(height: 16),
       _marketAlertsCard(),
       const SizedBox(height: 16),
+      _suitabilityCard(),
+      const SizedBox(height: 16),
       const Text('Distribuição'),
       const SizedBox(height: 8),
       ...categories.map((item) => ListTile(
@@ -990,6 +1032,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ]);
   }
 
+  // Cartão de notificações com filtros, leitura individual e leitura em massa.
   Widget _notificationsCard() {
     final unread = notifications
         .where((notification) =>
@@ -1063,6 +1106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Lista de alertas de preço e ações para editar, pausar ou cancelar cada alerta.
   Widget _marketAlertsCard() {
     return Card(
       child: Padding(
@@ -1092,6 +1136,280 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  // Apresenta o estado da avaliação e os percentuais da carteira modelo.
+  Widget _suitabilityCard() {
+    final assessment = suitability;
+    if (assessment == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Carteira sugerida',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              const Text(
+                  'Responda algumas perguntas para receber uma sugestão de alocação por objetivo e perfil de risco.'),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: openSuitabilityQuestionnaire,
+                icon: const Icon(Icons.assignment_outlined),
+                label: const Text('Responder questionário'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final recommendation =
+        Map<String, dynamic>.from(assessment['recommendation'] as Map? ?? {});
+    final allocations = List<dynamic>.from(
+        recommendation['allocations'] as List? ?? <dynamic>[]);
+    final status = assessment['status']?.toString() ?? 'pending_review';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text('Sua carteira sugerida',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                IconButton(
+                  tooltip: 'Refazer questionário',
+                  onPressed: openSuitabilityQuestionnaire,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            Text(
+              '${assessment['objective_label']} · perfil ${assessment['risk_profile_label']}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text('Status: ${suitabilityStatusLabel(status)}'),
+            const SizedBox(height: 8),
+            Text(assessment['risk_profile_description']?.toString() ?? ''),
+            if (recommendation['summary'] != null) ...[
+              const SizedBox(height: 8),
+              Text(recommendation['summary'].toString()),
+            ],
+            const Divider(height: 24),
+            const Text('Alocação de referência',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            ...allocations.map((item) {
+              final allocation = Map<String, dynamic>.from(item as Map);
+              final percentage =
+                  int.tryParse(allocation['percentage']?.toString() ?? '') ?? 0;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(allocation['label'].toString())),
+                        Text('$percentage%',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    LinearProgressIndicator(value: percentage / 100),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            const Text(
+              'Esta é uma carteira modelo por classes de ativos. A validação do Advisor é necessária antes de qualquer decisão.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: openSuitabilityQuestionnaire,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Atualizar respostas'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String suitabilityStatusLabel(dynamic value) => switch (value.toString()) {
+        'approved' => 'Aprovada pelo Advisor',
+        'rejected' => 'Aguardando nova validação',
+        'superseded' => 'Substituída por uma avaliação mais recente',
+        _ => 'Aguardando validação do Advisor',
+      };
+
+  // Abre o formulário completo e envia as respostas para a avaliação versionada.
+  Future<void> openSuitabilityQuestionnaire() async {
+    Map<String, dynamic> definition;
+    try {
+      definition = await widget.api.suitabilityQuestionnaire();
+    } on ApiException catch (exception) {
+      if (mounted) showFormError(exception.message);
+      return;
+    }
+
+    final objectives = List<dynamic>.from(
+        definition['objectives'] as List? ?? <dynamic>[]);
+    final questions = List<dynamic>.from(
+        definition['questions'] as List? ?? <dynamic>[]);
+    if (objectives.isEmpty || questions.isEmpty) {
+      if (mounted) showFormError('O questionário ainda não está disponível.');
+      return;
+    }
+    var objective = suitability?['objective']?.toString() ??
+        Map<String, dynamic>.from(objectives.first as Map)['value'].toString();
+    final answers = <String, String>{};
+    final savedAnswers = suitability?['answers'];
+    if (savedAnswers is Map) {
+      savedAnswers.forEach((key, value) {
+        answers[key.toString()] = value.toString();
+      });
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) {
+        var submitting = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Perfil e carteira sugerida'),
+            content: SizedBox(
+              width: 560,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Escolha seu objetivo principal e responda com base na sua situação atual. Não existem respostas certas ou erradas.',
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: objective,
+                      decoration:
+                          const InputDecoration(labelText: 'Objetivo principal'),
+                      items: objectives
+                          .map((item) {
+                            final value =
+                                Map<String, dynamic>.from(item as Map);
+                            return DropdownMenuItem<String>(
+                              value: value['value'].toString(),
+                              child: Text(value['label'].toString()),
+                            );
+                          })
+                          .toList(),
+                      onChanged: submitting
+                          ? null
+                          : (value) => setDialogState(
+                              () => objective = value ?? objective),
+                    ),
+                    const SizedBox(height: 16),
+                    ...questions.map((item) {
+                      final question = Map<String, dynamic>.from(item as Map);
+                      final key = question['key'].toString();
+                      final options = List<dynamic>.from(
+                          question['options'] as List? ?? <dynamic>[]);
+                      final optionValues = options
+                          .map((option) =>
+                              Map<String, dynamic>.from(option as Map)['value'])
+                          .map((value) => value.toString())
+                          .toSet();
+                      final selected = optionValues.contains(answers[key])
+                          ? answers[key]
+                          : null;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 14),
+                        child: DropdownButtonFormField<String>(
+                          initialValue: selected,
+                          decoration: InputDecoration(
+                            labelText: question['label'].toString(),
+                            helperText: question['description']?.toString(),
+                          ),
+                          items: options
+                              .map((option) {
+                                final value =
+                                    Map<String, dynamic>.from(option as Map);
+                                return DropdownMenuItem<String>(
+                                  value: value['value'].toString(),
+                                  child: Text(value['label'].toString()),
+                                );
+                              })
+                              .toList(),
+                          onChanged: submitting
+                              ? null
+                              : (value) => setDialogState(() {
+                                    if (value == null) {
+                                      answers.remove(key);
+                                    } else {
+                                      answers[key] = value;
+                                    }
+                                  }),
+                        ),
+                      );
+                    }),
+                    const Text(
+                      'A carteira exibida é uma referência por classe de ativo e ficará pendente de validação do Advisor.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: submitting ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: submitting || answers.length != questions.length
+                    ? null
+                    : () async {
+                        setDialogState(() => submitting = true);
+                        try {
+                          final submitted = await widget.api.submitSuitability(
+                            objective: objective,
+                            answers: answers,
+                          );
+                          if (!dialogContext.mounted) return;
+                          Navigator.pop(dialogContext, submitted);
+                        } on ApiException catch (exception) {
+                          if (!dialogContext.mounted) return;
+                          setDialogState(() => submitting = false);
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              SnackBar(content: Text(exception.message)));
+                        }
+                      },
+                child: Text(submitting ? 'Calculando...' : 'Gerar sugestão'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (result == null || !mounted) return;
+    setState(() => suitability = result);
+    await widget.api.secureStorage.delete(clientCacheKey);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Questionário salvo e carteira sugerida gerada.')));
+    }
   }
 
   Future<void> cancelMarketAlert(Map<String, dynamic> alert) async {
@@ -1556,6 +1874,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$prefix ${formatBrazilianNumber(value)}';
   }
 
+  // Exibe a carteira consolidada por posição, moeda e resultado.
   Widget _investmentPortfolioView() {
     final portfolio = investmentPortfolio ?? <String, dynamic>{};
     final positions = List<dynamic>.from(portfolio['positions'] as List? ?? []);
@@ -1654,6 +1973,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Patrimônio, metas e plano de ação são módulos independentes da carteira.
   Widget _patrimonyView() {
     final canEdit = permissions?['can_edit_patrimony'] == true;
     return Column(
@@ -1784,6 +2104,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Relatórios são somente leitura no mobile; a publicação ocorre no painel Advisor.
   Widget _reportsView() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1806,6 +2127,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Documentos exibem o estado de revisão e permitem visualizar/baixar o arquivo.
   Widget _documentsView() {
     final canUpload = user?['role'] != 'client' &&
         permissions?['can_upload_documents'] == true;
@@ -1885,6 +2207,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   decoration:
                       const InputDecoration(labelText: 'Tipo de documento'),
                   items: const [
+                    DropdownMenuItem(
+                        value: 'identification', child: Text('Identificação')),
                     DropdownMenuItem(
                         value: 'income_proof',
                         child: Text('Comprovante de renda')),
@@ -2784,6 +3108,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Perfil reúne identidade, endereço, dados financeiros e preferências de segurança.
   Widget _profileView() {
     return Card(
       child: Padding(
@@ -2848,6 +3173,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: const Text('Editar perfil financeiro'),
               ),
             ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: openSuitabilityQuestionnaire,
+              icon: const Icon(Icons.assignment_outlined),
+              label: Text(suitability == null
+                  ? 'Responder perfil de investidor'
+                  : 'Ver ou atualizar carteira sugerida'),
+            ),
             const SizedBox(height: 24),
             if (biometricAvailable) ...[
               OutlinedButton.icon(
@@ -2897,6 +3230,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// Visualizador protegido: recebe bytes baixados pela API e escolhe o renderer adequado.
 class DocumentViewerScreen extends StatefulWidget {
   const DocumentViewerScreen({
     super.key,

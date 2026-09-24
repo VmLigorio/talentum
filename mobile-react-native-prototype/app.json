@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Talentum Prototype",
+    "slug": "talentum-mobile-react-native-prototype",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "talentum-prototype",
+    "android": {
+      "package": "com.talentum.mobileprototype"
+    },
+    "ios": {
+      "bundleIdentifier": "com.talentum.mobileprototype"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}

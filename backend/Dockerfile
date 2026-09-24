@@ -1,3 +1,5 @@
+# Talentum — backend/Dockerfile
+# Responsabilidade: define a imagem de execução da API dentro do Docker.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

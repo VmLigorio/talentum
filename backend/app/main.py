@@ -28,6 +28,7 @@ from app.api.market_watchlist import router as market_watchlist_router
 from app.api.investment_positions import router as investment_positions_router
 from app.api.investment_analytics import router as investment_analytics_router
 from app.api.portfolio_snapshots import router as portfolio_snapshots_router
+from app.api.suitability import router as suitability_router
 from app.core.config import get_cors_origins, get_settings, get_trusted_hosts
 from app.db.database import SessionLocal, get_db
 from app.services.market_alerts import sync_all_market_alerts
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+# Adiciona cabeçalhos básicos para reduzir riscos no navegador e em proxies.
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -55,6 +57,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Impede uploads ou payloads excessivos antes que atinjam as rotas.
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         content_length = request.headers.get("content-length")
@@ -63,6 +66,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# Mede cada requisição e registra um identificador útil para diagnóstico.
 class RequestObservabilityMiddleware(BaseHTTPMiddleware):
     """Adds a safe correlation id and duration without logging sensitive payloads."""
 
@@ -100,6 +104,7 @@ class RequestObservabilityMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Executa a verificação de alertas em modo síncrono dentro do ciclo assíncrono.
 def _run_market_alert_sync() -> tuple[int, int]:
     db = SessionLocal()
     try:
@@ -114,6 +119,7 @@ def _run_market_alert_sync() -> tuple[int, int]:
         db.close()
 
 
+# Tarefa periódica que converte cotações atingidas em notificações.
 async def market_alert_monitor() -> None:
     interval = max(30, get_settings().market_alert_check_interval_seconds)
     while True:
@@ -128,6 +134,7 @@ async def market_alert_monitor() -> None:
         await asyncio.sleep(interval)
 
 
+# Captura o valor da carteira de clientes com posições atualizadas.
 def _run_portfolio_snapshot_capture() -> tuple[int, int, int]:
     db = SessionLocal()
     try:
@@ -142,6 +149,7 @@ def _run_portfolio_snapshot_capture() -> tuple[int, int, int]:
         db.close()
 
 
+# Tarefa periódica que preserva a evolução histórica das carteiras.
 async def portfolio_snapshot_monitor() -> None:
     interval = max(300, get_settings().portfolio_snapshot_interval_seconds)
     while True:
@@ -161,6 +169,7 @@ async def portfolio_snapshot_monitor() -> None:
         await asyncio.sleep(interval)
 
 
+# Cria avisos para documentos cujo ciclo anual de revisão venceu.
 def _run_document_review_sync() -> int:
     db = SessionLocal()
     try:
@@ -186,6 +195,7 @@ def _run_document_review_sync() -> int:
         db.close()
 
 
+# Tarefa periódica de conformidade documental.
 async def document_review_monitor() -> None:
     interval = 24 * 60 * 60
     while True:
@@ -204,6 +214,7 @@ async def document_review_monitor() -> None:
 
 
 @asynccontextmanager
+# Inicia e encerra as tarefas periódicas junto com o processo FastAPI.
 async def lifespan(_: FastAPI):
     monitor_task = asyncio.create_task(market_alert_monitor())
     snapshot_task = asyncio.create_task(portfolio_snapshot_monitor())
@@ -232,6 +243,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.api_docs_enabled else None,
 )
 
+# Middlewares transversais são registrados antes das rotas.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(RequestObservabilityMiddleware)
@@ -262,8 +274,10 @@ app.include_router(market_watchlist_router)
 app.include_router(investment_positions_router)
 app.include_router(investment_analytics_router)
 app.include_router(portfolio_snapshots_router)
+app.include_router(suitability_router)
 
 
+# Health check simples para confirmar que o processo está vivo.
 @app.get("/health", tags=["system"])
 def health_check() -> dict[str, str]:
     """Return the minimum liveness response for local and future deploy checks."""

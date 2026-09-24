@@ -1,3 +1,5 @@
+// Talentum — mobile/android/build.gradle.kts
+// Responsabilidade: configura valores compartilhados pelos módulos Android.
 allprojects {
     repositories {
         google()

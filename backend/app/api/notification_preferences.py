@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/notification_preferences.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

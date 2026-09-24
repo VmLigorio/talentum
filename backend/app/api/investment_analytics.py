@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/investment_analytics.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 

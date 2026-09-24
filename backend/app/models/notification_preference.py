@@ -1,3 +1,6 @@
+# Talentum — backend/app/models/notification_preference.py
+# Responsabilidade: Define os modelos ORM que representam as entidades persistidas no banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from sqlalchemy import Boolean, ForeignKey, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -1,5 +1,9 @@
+// Talentum — advisor/app.js
+// Responsabilidade: Controla o estado do painel Advisor, chamadas à API, renderização e interações da tela.
+// Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 const API = new URLSearchParams(window.location.search).get("api") || "http://127.0.0.1:8001";
-const state = { token: sessionStorage.getItem("talentum_advisor_token"), refreshToken: sessionStorage.getItem("talentum_advisor_refresh_token"), clients: [], advisors: [], team: [], notifications: [], notificationPreferences: null, notificationTypeFilter: "all", notificationReadFilter: "all", userRole: null, selected: null, permissions: null, financialProfile: null, clientProfile: null, editingReport: null, reports: [], documents: [], patrimony: [], goals: [], actionPlan: [], editingPatrimony: null, editingGoal: null, editingAction: null, investmentPortfolio: null, editingInvestmentPosition: null, investmentAnalytics: null, investmentSnapshots: [], marketResults: [], marketTypeFilter: "all", marketSectorFilter: "all", marketSort: "relevance", marketCompareKeys: [], marketComparisonHistories: [], marketComparisonPeriod: "1y", marketAlerts: [], editingMarketAlert: null, marketWatchlist: [] };
+// Estado global da sessão e dos painéis; os dados são atualizados após cada operação.
+const state = { token: sessionStorage.getItem("talentum_advisor_token"), refreshToken: sessionStorage.getItem("talentum_advisor_refresh_token"), clients: [], advisors: [], team: [], notifications: [], notificationPreferences: null, notificationTypeFilter: "all", notificationReadFilter: "all", userRole: null, selected: null, permissions: null, financialProfile: null, clientProfile: null, suitability: null, editingReport: null, reports: [], documents: [], patrimony: [], goals: [], actionPlan: [], editingPatrimony: null, editingGoal: null, editingAction: null, investmentPortfolio: null, editingInvestmentPosition: null, investmentAnalytics: null, investmentSnapshots: [], marketResults: [], marketTypeFilter: "all", marketSectorFilter: "all", marketSort: "relevance", marketCompareKeys: [], marketComparisonHistories: [], marketComparisonPeriod: "1y", marketAlerts: [], editingMarketAlert: null, marketWatchlist: [] };
 const $ = (id) => document.getElementById(id);
 const money = (value) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[character]));
@@ -20,6 +24,7 @@ const formatApiError = (data, status) => {
 const formatDate = (value) => value ? new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`)) : "";
 const isOverdue = (date, status) => Boolean(date && status !== "completed" && new Date(`${date}T23:59:59`) < new Date());
 const isGoalOverdue = (date, status) => isOverdue(date, status);
+// Cliente HTTP: injeta o token, interpreta erros e renova a sessão quando necessário.
 const api = async (path, options = {}, retryOnUnauthorized = true) => {
   let response;
   const { responseType, ...requestOptions } = options;
@@ -51,6 +56,7 @@ const api = async (path, options = {}, retryOnUnauthorized = true) => {
 const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
 const setFeedback = (id, message, error = false) => { $(id).textContent = message; $(id).style.color = error ? "#b84a5c" : ""; };
 
+// Mostra imediatamente ao usuário se a API configurada está pronta.
 async function checkApiHealth() {
   const status = $("api-status");
   try {
@@ -64,6 +70,7 @@ async function checkApiHealth() {
   }
 }
 
+// Autentica o Advisor/administrador e carrega o workspace após o login.
 async function login(event) {
   event.preventDefault();
   $("login-error").textContent = "";
@@ -75,6 +82,7 @@ async function login(event) {
   } catch (error) { $("login-error").textContent = error.message; }
 }
 
+// Monta o estado inicial de acordo com a role e habilita os módulos permitidos.
 async function start() {
   try {
     const user = await api("/auth/me");
@@ -100,6 +108,7 @@ async function start() {
   }
 }
 
+// Renderiza a lista filtrável de clientes e destaca o cliente selecionado.
 function renderClients() {
   $("client-list").innerHTML = "";
   const query = $("client-search").value.trim().toLowerCase();
@@ -119,6 +128,7 @@ function renderOverview() {
   $("overview-advisor-count").textContent = state.userRole === "admin" ? state.advisors.length : "—";
 }
 
+// Renderiza notificações aplicando filtros por tipo e status de leitura.
 function renderNotifications() {
   const unread = state.notifications.filter((notification) => !notification.read_at);
   const visible = state.notifications.filter((notification) => {
@@ -137,6 +147,7 @@ function renderNotificationPreferences() {
   document.querySelectorAll("[data-notification-preference]").forEach((input) => { input.checked = Boolean(state.notificationPreferences[input.dataset.notificationPreference]); });
 }
 
+// Persiste no backend as preferências que controlam os avisos do usuário.
 async function saveNotificationPreferences() {
   const payload = Object.fromEntries([...document.querySelectorAll("[data-notification-preference]")].map((input) => [input.dataset.notificationPreference, input.checked]));
   try {
@@ -166,6 +177,7 @@ function closeNotificationsDialog() {
   $("notifications-dialog").close();
 }
 
+// Marca uma notificação individual sem recarregar o restante do workspace.
 async function markNotificationRead(notificationId) {
   try {
     await api(`/notifications/${notificationId}/read`, { method: "PATCH" });
@@ -191,6 +203,7 @@ async function markAllNotificationsRead() {
   } catch (error) { window.alert(error.message); }
 }
 
+// Formatadores de mercado evitam que valores nulos ou moedas inválidas quebrem a tela.
 function marketNumber(value) {
   return value === null || value === undefined || Number.isNaN(Number(value)) ? "—" : new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(Number(value));
 }
@@ -216,6 +229,7 @@ function marketDetailValue(value, formatter = marketNumber) {
   return value === null || value === undefined || value === "" ? "—" : formatter(value);
 }
 
+// Desenha o histórico em SVG, incluindo escala lateral, retorno e benchmark.
 function renderMarketHistory(panel, data) {
   const points = (data.points || []).filter((point) => point.return_percent !== null && point.return_percent !== undefined);
   const benchmark = (data.benchmark_points || []).filter((point) => point.return_percent !== null && point.return_percent !== undefined);
@@ -238,6 +252,7 @@ function renderMarketHistory(panel, data) {
   panel.innerHTML = `<div class="market-history-metrics"><div><small class="muted">Volatilidade anualizada</small><strong>${marketDetailValue(data.annualized_volatility, (value) => `${marketNumber(value)}%`)}</strong><span>${volatilityBand}</span></div><div><small class="muted">Maior queda no período</small><strong>${marketDetailValue(data.max_drawdown, (value) => `${marketNumber(value)}%`)}</strong><span>do topo ao vale</span></div><div><small class="muted">Volume médio</small><strong>${marketNumber(data.average_volume)}</strong><span>${marketNumber(data.observation_count)} observações</span></div></div><div class="market-chart-summary"><span>Retorno de ${formatDateTime(points[0].date)} a ${formatDateTime(last.date)}: <strong>${formatReturn(last.return_percent)}</strong></span><span class="market-chart-legend"><i class="asset"></i>${escapeHtml(data.symbol)}${benchmarkLast ? `<i class="benchmark"></i>${escapeHtml(data.benchmark_symbol || "Referência")}` : ""}</span></div><div class="market-chart-wrap"><svg class="market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico de retorno percentual">${grid}<line x1="${padX}" y1="${toY(0)}" x2="${width - 12}" y2="${toY(0)}" class="market-chart-zero"></line><polyline points="${line(points)}" class="market-chart-line asset"></polyline>${benchmarkLast ? `<polyline points="${line(benchmark)}" class="market-chart-line benchmark"></polyline>` : ""}</svg></div><div class="market-chart-footer"><span>${escapeHtml(formatDateTime(points[0].date))}</span><span>Retorno acumulado (%)</span><span>${escapeHtml(formatDateTime(last.date))}</span></div>`;
 }
 
+// Aplica filtros e ordenação local sobre os resultados já recebidos da API.
 function marketFilteredResults() {
   const filtered = state.marketResults.filter((item) => {
     const typeMatch = state.marketTypeFilter === "all" || String(item.asset_type || "").toLowerCase() === state.marketTypeFilter;
@@ -367,6 +382,7 @@ async function loadMarketWatchlist() {
   } catch (error) { state.marketWatchlist = []; $("market-watchlist-list").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
 }
 
+// Inclui um ativo na lista de acompanhamento do cliente escolhido.
 async function createMarketWatchlistItem(event) {
   event.preventDefault();
   const clientId = Number($("market-watchlist-client").value);
@@ -406,6 +422,7 @@ function openMarketWatchlistItem(button) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// Cria ou atualiza um alerta de preço conforme o formulário selecionado.
 async function createMarketAlert(event) {
   event.preventDefault();
   const clientId = Number($("market-alert-client").value);
@@ -474,6 +491,7 @@ function renderMarketComparison(panel, histories) {
   panel.innerHTML = `<div class="market-chart-summary"><span>Retorno acumulado normalizado</span><span class="market-chart-legend-list">${legend}</span></div><div class="market-chart-wrap"><svg class="market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Comparação histórica de ativos">${grid}<line x1="${padX}" y1="${toY(0)}" x2="${width - 12}" y2="${toY(0)}" class="market-chart-zero"></line>${lines}</svg></div><div class="market-comparison-ranking"><p class="eyebrow">resultado no período</p>${ranking}</div>`;
 }
 
+// Busca históricos de até três ativos e prepara a comparação visual.
 async function compareSelectedMarketAssets() {
   const selected = state.marketResults.filter((item) => state.marketCompareKeys.includes(marketKey(item))).slice(0, 3);
   if (selected.length < 2) return;
@@ -632,6 +650,7 @@ function openMarketResearch() {
   $("market-query").focus();
 }
 
+// Pesquisa ativos no Brasil ou no exterior e atualiza filtros/resultados.
 async function searchMarket(event) {
   event.preventDefault();
   const query = $("market-query").value.trim();
@@ -665,6 +684,7 @@ async function searchMarket(event) {
   }
 }
 
+// Recarrega os dados principais sem perder a tela atualmente selecionada.
 async function refreshWorkspace() {
   const button = $("refresh-workspace");
   const selectedId = state.selected?.id;
@@ -739,6 +759,7 @@ function resetSelectedClientPassword() {
   if (state.selected) resetUserPassword(state.selected.id, "cliente");
 }
 
+// Carrega todos os módulos do cliente para o painel de acompanhamento.
 async function selectClient(id) {
   show("market-view", false);
   show("empty-state", false);
@@ -756,8 +777,8 @@ async function selectClient(id) {
   document.querySelectorAll(".client-button").forEach((button) => button.classList.toggle("active", Number(button.dataset.id) === id));
   show("empty-state", false); show("client-view", true); $("client-name").textContent = state.selected.name; $("client-email").textContent = state.selected.email; $("client-status").textContent = state.selected.is_active ? "Ativo" : "Inativo";
   try {
-    const [dashboard, permissions, reports, documents, financialProfile, clientProfile, audit, patrimony, goals, actionPlan, investmentPortfolio] = await Promise.all([api(`/clients/${id}/dashboard`), api(`/clients/${id}/permissions`), api(`/clients/${id}/reports`), api(`/clients/${id}/documents`), api(`/clients/${id}/financial-profile`).catch((error) => { if (error.status === 404) return null; throw error; }), api(`/clients/${id}/profile`), api(`/clients/${id}/audit-log`), api(`/clients/${id}/patrimony`), api(`/clients/${id}/goals`), api(`/clients/${id}/action-plan`), api(`/clients/${id}/investment-portfolio`)]);
-    state.permissions = permissions; state.financialProfile = financialProfile; state.clientProfile = clientProfile; state.reports = reports; state.documents = documents; state.patrimony = patrimony; state.goals = goals; state.actionPlan = actionPlan; state.investmentPortfolio = investmentPortfolio; renderDashboard(dashboard, reports); renderInvestmentPortfolio(investmentPortfolio); renderInvestmentHistoryCurrencies(investmentPortfolio); renderPermissions(permissions); renderFinancialProfile(financialProfile); renderReports(reports); renderDocuments(documents); renderClientProfile(clientProfile); renderAudit(audit); renderQuickRecords(); renderActionPlan(); refreshNotifications().catch(() => {});
+    const [dashboard, permissions, reports, documents, financialProfile, clientProfile, audit, patrimony, goals, actionPlan, investmentPortfolio, suitability] = await Promise.all([api(`/clients/${id}/dashboard`), api(`/clients/${id}/permissions`), api(`/clients/${id}/reports`), api(`/clients/${id}/documents`), api(`/clients/${id}/financial-profile`).catch((error) => { if (error.status === 404) return null; throw error; }), api(`/clients/${id}/profile`), api(`/clients/${id}/audit-log`), api(`/clients/${id}/patrimony`), api(`/clients/${id}/goals`), api(`/clients/${id}/action-plan`), api(`/clients/${id}/investment-portfolio`), api(`/clients/${id}/suitability`).catch((error) => { if (error.status === 404) return null; throw error; })]);
+    state.permissions = permissions; state.financialProfile = financialProfile; state.clientProfile = clientProfile; state.suitability = suitability; state.reports = reports; state.documents = documents; state.patrimony = patrimony; state.goals = goals; state.actionPlan = actionPlan; state.investmentPortfolio = investmentPortfolio; renderDashboard(dashboard, reports); renderInvestmentPortfolio(investmentPortfolio); renderInvestmentHistoryCurrencies(investmentPortfolio); renderPermissions(permissions); renderFinancialProfile(financialProfile); renderSuitability(suitability); renderReports(reports); renderDocuments(documents); renderClientProfile(clientProfile); renderAudit(audit); renderQuickRecords(); renderActionPlan(); refreshNotifications().catch(() => {});
   } catch (error) { setFeedback("permission-status", error.message, true); }
 }
 
@@ -783,6 +804,7 @@ function portfolioPnl(position) {
   return (Number(position.pnl) >= 0 ? "+" : "") + value + " (" + Number(position.pnl_percent || 0).toFixed(2).replace(".", ",") + "%)";
 }
 
+// Exibe posições, valores, variação e distribuição da carteira do cliente.
 function renderInvestmentPortfolio(portfolio) {
   state.investmentPortfolio = portfolio;
   const mixedCurrency = portfolio.mixed_currency === true;
@@ -865,6 +887,7 @@ async function loadInvestmentSnapshots() {
   finally { if (button) { button.disabled = false; button.textContent = "Atualizar histórico"; } }
 }
 
+// Salva uma fotografia temporal da carteira para formar o histórico de evolução.
 async function captureInvestmentSnapshot() {
   if (!state.selected) return;
   const button = $("investment-history-capture");
@@ -878,6 +901,7 @@ async function captureInvestmentSnapshot() {
   finally { if (button) { button.disabled = false; button.textContent = "Capturar agora"; } }
 }
 
+// Consulta históricos e benchmarks para gerar a análise comparativa da carteira.
 async function loadInvestmentAnalytics() {
   if (!state.selected) return;
   const period = $("investment-analytics-period").value;
@@ -913,9 +937,9 @@ async function addInvestmentPosition(event) {
     return;
   }
   try {
-    const payload = { symbol: $("investment-symbol").value.trim(), market: $("investment-market").value, quantity, average_price: averagePrice, institution: $("investment-institution").value.trim() || null, notes: $("investment-notes").value.trim() || null };
+    const payload = { symbol: $("investment-symbol").value.trim(), name: $("investment-name").value.trim() || null, market: $("investment-market").value, quantity, average_price: averagePrice, institution: $("investment-institution").value.trim() || null, notes: $("investment-notes").value.trim() || null };
     const editing = Boolean(state.editingInvestmentPosition);
-    await api(editing ? "/clients/" + state.selected.id + "/investment-positions/" + state.editingInvestmentPosition.id : "/clients/" + state.selected.id + "/investment-positions", { method: editing ? "PATCH" : "POST", body: JSON.stringify(editing ? { quantity, average_price: averagePrice, institution: payload.institution, notes: payload.notes } : payload) });
+    await api(editing ? "/clients/" + state.selected.id + "/investment-positions/" + state.editingInvestmentPosition.id : "/clients/" + state.selected.id + "/investment-positions", { method: editing ? "PATCH" : "POST", body: JSON.stringify(editing ? { symbol: payload.symbol, name: payload.name, market: payload.market, quantity, average_price: averagePrice, institution: payload.institution, notes: payload.notes } : payload) });
     cancelInvestmentPositionEdit(false);
     setFeedback("investment-position-status", editing ? "Posição atualizada." : "Posição adicionada.");
     await selectClient(state.selected.id);
@@ -926,6 +950,7 @@ function startInvestmentPositionEdit(item) {
   if (!item) return;
   state.editingInvestmentPosition = item;
   $("investment-symbol").value = item.symbol;
+  $("investment-name").value = item.name || "";
   $("investment-market").value = item.market;
   $("investment-quantity").value = item.quantity;
   $("investment-average-price").value = item.average_price;
@@ -969,13 +994,20 @@ function formatBytes(value) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Atualiza o texto do seletor para confirmar visualmente o arquivo escolhido.
+function updateDocumentFileName() {
+  const file = $("document-file").files[0];
+  $("document-file-name").textContent = file ? file.name : "Nenhum arquivo selecionado";
+}
+
 function renderDocuments(documents) {
-  const kindLabels = { income_proof: "Comprovante de renda", address_proof: "Comprovante de endereço", other: "Outro documento" };
+  const kindLabels = { identification: "Identificação", income_proof: "Comprovante de renda", address_proof: "Comprovante de endereço", other: "Outro documento" };
   $("documents-list").innerHTML = documents.length ? documents.map((item) => `<article class="quick-record document-record"><div><strong>${escapeHtml(item.original_name)}</strong><small class="muted">${escapeHtml(kindLabels[item.kind] || kindLabels.other)} · ${formatBytes(item.size_bytes)} · ${formatDate(item.created_at)}${item.description ? ` · ${escapeHtml(item.description)}` : ""}</small></div><div class="quick-record-actions"><button class="button ghost small" data-document-download="${item.id}" data-document-name="${escapeHtml(item.original_name)}">Baixar</button><button class="button ghost small" data-document-delete="${item.id}">Remover</button></div></article>`).join("") : '<p class="empty-line">Nenhum documento enviado.</p>';
   document.querySelectorAll("[data-document-download]").forEach((button) => { button.onclick = () => downloadDocument(Number(button.dataset.documentDownload), button.dataset.documentName); });
   document.querySelectorAll("[data-document-delete]").forEach((button) => { button.onclick = () => deleteDocument(Number(button.dataset.documentDelete)); });
 }
 
+// Envia documentos com multipart e atualiza a lista após a validação do backend.
 async function uploadDocument(event) {
   event.preventDefault();
   if (!state.selected) return;
@@ -989,6 +1021,7 @@ async function uploadDocument(event) {
   try {
     await api(`/clients/${state.selected.id}/documents`, { method: "POST", body: formData });
     $("document-form").reset();
+    updateDocumentFileName();
     setFeedback("document-status", "Documento enviado com sucesso.");
     await selectClient(state.selected.id);
   } catch (error) { setFeedback("document-status", error.message, true); }
@@ -1094,6 +1127,34 @@ function renderFinancialProfile(profile) {
   setFeedback("financial-status", profile ? "Dados carregados." : "Ainda não cadastrado. Preencha os dados para criar o perfil.");
 }
 
+// Mostra ao Advisor o resultado versionado do questionário do cliente.
+function renderSuitability(assessment) {
+  show("suitability-empty", !assessment);
+  show("suitability-content", Boolean(assessment));
+  if (!assessment) return;
+  const statusLabels = { pending_review: "Aguardando validação", approved: "Aprovada", rejected: "Nova avaliação solicitada", superseded: "Substituída" };
+  const recommendation = assessment.recommendation || {};
+  $("suitability-summary").innerHTML = `<div><small>Objetivo</small><strong>${escapeHtml(assessment.objective_label)}</strong></div><div><small>Perfil de risco</small><strong>${escapeHtml(assessment.risk_profile_label)}</strong></div><div><small>Pontuação</small><strong>${escapeHtml(assessment.score)}</strong></div><div><small>Status</small><strong>${escapeHtml(statusLabels[assessment.status] || assessment.status)}</strong></div>`;
+  $("suitability-recommendation").textContent = `${recommendation.title || "Carteira sugerida"}. ${recommendation.summary || ""}`;
+  $("suitability-allocations").innerHTML = (recommendation.allocations || []).map((allocation) => `<div class="suitability-allocation"><div class="row-top"><strong>${escapeHtml(allocation.label)}</strong><span>${escapeHtml(allocation.percentage)}%</span></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, Number(allocation.percentage || 0)))}%"></i></div><small class="muted">${escapeHtml(allocation.rationale)}</small></div>`).join("");
+  const expiryLabel = assessment.expires_at ? new Intl.DateTimeFormat("pt-BR").format(new Date(assessment.expires_at)) : "não informada";
+  setFeedback("suitability-status", `${statusLabels[assessment.status] || assessment.status}. Validade: ${expiryLabel}`);
+  $("suitability-approve").disabled = assessment.status === "approved";
+  $("suitability-reject").disabled = assessment.status === "rejected";
+}
+
+// Registra a decisão do Advisor e mantém o histórico de auditoria no backend.
+async function reviewSuitability(approved) {
+  if (!state.selected || !state.suitability) return;
+  try {
+    state.suitability = await api(`/clients/${state.selected.id}/suitability/${state.suitability.id}/review`, { method: "POST", body: JSON.stringify({ approved }) });
+    renderSuitability(state.suitability);
+    setFeedback("suitability-status", approved ? "Carteira aprovada e registrada." : "Nova avaliação solicitada ao cliente.");
+    await selectClient(state.selected.id);
+  } catch (error) { setFeedback("suitability-status", error.message, true); }
+}
+
+// Preenche o formulário cadastral com os dados visíveis e editáveis pelo Advisor.
 function renderClientProfile(profile) {
   $("client-profile-name").value = profile?.name ?? "";
   $("client-profile-phone").value = profile?.phone ?? "";
@@ -1144,6 +1205,7 @@ async function toggleClientAccess() {
   } catch (error) { setFeedback("assignment-status", error.message, true); }
 }
 
+// Persiste renda, despesas e perfil de risco do cliente selecionado.
 async function saveFinancialProfile(event) {
   event.preventDefault(); if (!state.selected) return;
   const payload = { monthly_income: Number($("monthly-income").value), monthly_expenses: Number($("monthly-expenses").value), risk_profile: $("risk-profile").value.trim() || null };
@@ -1161,6 +1223,7 @@ async function savePermissions() {
   catch (error) { setFeedback("permission-status", error.message, true); }
 }
 
+// Cria ou atualiza um relatório que será disponibilizado ao cliente.
 async function publishReport(event) {
   event.preventDefault(); if (!state.selected) return;
   const payload = { title: $("report-title").value.trim(), period_start: $("period-start").value, period_end: $("period-end").value, summary: $("report-summary").value.trim(), status: $("report-status-select").value };
@@ -1232,6 +1295,7 @@ async function deleteAdvisorGoal(goalId) {
   catch (error) { setFeedback("advisor-goal-status", error.message, true); }
 }
 
+// Cria ou atualiza uma ação do plano de acompanhamento do cliente.
 async function saveAction(event) {
   event.preventDefault(); if (!state.selected) return;
   const title = $("action-title").value.trim();
@@ -1301,6 +1365,7 @@ function closePasswordDialog() {
   $("password-form").reset();
 }
 
+// Troca a senha do usuário atual e encerra a sessão para exigir novo login.
 async function changePassword(event) {
   event.preventDefault();
   if ($("new-password").value !== $("confirm-password").value) { setFeedback("password-status", "As novas senhas não conferem.", true); return; }
@@ -1320,6 +1385,7 @@ function closeUserDialog() {
   $("user-form").reset();
 }
 
+// Permite ao administrador criar usuários e atualizar as listas do workspace.
 async function createUser(event) {
   event.preventDefault();
   if ($("new-user-password").value !== $("new-user-confirm").value) { setFeedback("user-status", "As senhas não conferem.", true); return; }
@@ -1329,8 +1395,10 @@ async function createUser(event) {
   } catch (error) { setFeedback("user-status", error.message, true); }
 }
 
+// Liga os formulários e controles da página aos handlers de negócio.
 $("login-form").addEventListener("submit", login); $("client-search").addEventListener("input", renderClients); $("client-status-filter").addEventListener("change", renderClients); $("manage-team").addEventListener("click", openTeamDialog); $("close-team").addEventListener("click", closeTeamDialog); $("new-user").addEventListener("click", openUserDialog); $("close-user").addEventListener("click", closeUserDialog); $("user-form").addEventListener("submit", createUser); $("change-password").addEventListener("click", openPasswordDialog); $("close-password").addEventListener("click", closePasswordDialog); $("password-form").addEventListener("submit", changePassword); $("save-permissions").addEventListener("click", savePermissions); $("save-financial-profile").addEventListener("click", saveFinancialProfile); $("financial-form").addEventListener("submit", saveFinancialProfile); $("save-client-profile").addEventListener("click", saveClientProfile); $("client-profile-form").addEventListener("submit", saveClientProfile); $("save-assignment").addEventListener("click", saveAssignment); $("assignment-form").addEventListener("submit", saveAssignment); $("toggle-client-access").addEventListener("click", toggleClientAccess); $("reset-client-password").addEventListener("click", resetSelectedClientPassword); $("advisor-patrimony-form").addEventListener("submit", addAdvisorPatrimony); $("advisor-patrimony-cancel").addEventListener("click", cancelPatrimonyEdit); $("advisor-goal-form").addEventListener("submit", addAdvisorGoal); $("advisor-goal-cancel").addEventListener("click", cancelGoalEdit); $("goal-filter").addEventListener("change", renderQuickRecords); $("action-form").addEventListener("submit", saveAction); $("action-filter").addEventListener("change", renderActionPlan); $("action-cancel").addEventListener("click", cancelActionEdit); $("report-form").addEventListener("submit", publishReport); $("report-filter").addEventListener("change", () => renderReports(state.reports)); $("cancel-report-edit").addEventListener("click", cancelReportEdit); $("logout").addEventListener("click", () => { sessionStorage.clear(); location.reload(); });
 $("document-form").addEventListener("submit", uploadDocument);
+$("document-file").addEventListener("change", updateDocumentFileName);
 $("investment-position-form").addEventListener("submit", addInvestmentPosition);
 $("investment-position-cancel").addEventListener("click", cancelInvestmentPositionEdit);
 $("investment-analytics-load").addEventListener("click", loadInvestmentAnalytics);
@@ -1361,5 +1429,7 @@ $("market-sort").addEventListener("change", (event) => { state.marketSort = even
 $("market-compare-button").addEventListener("click", compareSelectedMarketAssets);
 $("market-export-button").addEventListener("click", exportMarketAnalysis);
 $("market-compare-close").addEventListener("click", () => show("market-compare-panel", false));
+$("suitability-approve").addEventListener("click", () => reviewSuitability(true));
+$("suitability-reject").addEventListener("click", () => reviewSuitability(false));
 if (state.token) start();
 checkApiHealth();

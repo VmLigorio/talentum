@@ -1,3 +1,6 @@
+# Talentum — backend/app/core/security.py
+# Responsabilidade: Centraliza configuração, autenticação, autorização e controles transversais da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import hashlib
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4

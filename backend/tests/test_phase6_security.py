@@ -1,6 +1,9 @@
+# Talentum — backend/tests/test_phase6_security.py
+# Responsabilidade: Contém testes automatizados que protegem o comportamento esperado do sistema.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import pytest
 
-from app.api.documents import safe_original_name
+from app.api.documents import DOCUMENT_KINDS, safe_original_name
 from app.core.config import Settings
 from app.core.rate_limit import LoginRateLimiter
 
@@ -37,3 +40,7 @@ def test_login_rate_limiter_blocks_and_resets() -> None:
 def test_uploaded_filename_is_safe_for_headers_and_paths() -> None:
     assert safe_original_name("../../relatorio\r\n.pdf") == "relatorio__.pdf"
     assert safe_original_name("área financeira (2026).pdf") == "area financeira (2026).pdf"
+
+
+def test_identification_is_an_accepted_document_kind() -> None:
+    assert "identification" in DOCUMENT_KINDS

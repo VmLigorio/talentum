@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/admin.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator

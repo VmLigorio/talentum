@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/documents.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from pathlib import Path
 import re
 import unicodedata
@@ -39,7 +42,7 @@ ALLOWED_EXTENSIONS = {
     ".png": "image/png",
     ".txt": "text/plain",
 }
-DOCUMENT_KINDS = {"income_proof", "address_proof", "other"}
+DOCUMENT_KINDS = {"identification", "income_proof", "address_proof", "other"}
 
 
 def find_client(client_id: int, db: Session) -> User:

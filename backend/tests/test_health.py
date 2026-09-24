@@ -1,3 +1,6 @@
+# Talentum — backend/tests/test_health.py
+# Responsabilidade: Contém testes automatizados que protegem o comportamento esperado do sistema.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from app.main import app, health_check
 
 

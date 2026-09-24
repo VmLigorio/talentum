@@ -1,3 +1,6 @@
+# Talentum — backend/app/models/investment_position.py
+# Responsabilidade: Define os modelos ORM que representam as entidades persistidas no banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 from decimal import Decimal
 
@@ -15,6 +18,7 @@ class InvestmentPosition(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     market: Mapped[str] = mapped_column(String(10), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     average_price: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)

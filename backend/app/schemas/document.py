@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/document.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

@@ -1,3 +1,6 @@
+// Talentum — mobile/test/number_format_test.dart
+// Responsabilidade: Valida comportamentos importantes do aplicativo Flutter.
+// Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:talentum_mobile/main.dart';

@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0014_extend_profile_and_documents.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """extend client profile and classify documents
 
 Revision ID: 0014_profile_documents

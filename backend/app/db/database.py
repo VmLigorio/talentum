@@ -1,3 +1,6 @@
+# Talentum — backend/app/db/database.py
+# Responsabilidade: Configura a conexão com o banco e os recursos compartilhados pelo SQLAlchemy.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from collections.abc import Generator
 
 from sqlalchemy import create_engine

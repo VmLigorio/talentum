@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0005_create_reports.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create reports table
 
 Revision ID: 0005_create_reports

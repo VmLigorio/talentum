@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/dependencies.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer

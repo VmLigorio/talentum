@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/dashboard.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import date
 from decimal import Decimal
 

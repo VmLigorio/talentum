@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/market_alert.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 from typing import Literal
 

@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/investment_positions.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from decimal import Decimal, ROUND_HALF_UP
 
 import httpx
@@ -46,7 +49,7 @@ def _audit(db: Session, actor: User, client_id: int, action: str, item_id: int |
 def _quote(item: InvestmentPosition, service: MarketDataService) -> tuple[str | None, Decimal | None, str | None, str | None]:
     try:
         instrument = service.details(item.symbol, item.market)
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         return None, None, None, None
     price = Decimal(str(instrument.price)) if instrument.price is not None else None
     return instrument.name, price, instrument.currency, instrument.source
@@ -59,7 +62,8 @@ def _position_response(
     quote: tuple[str | None, Decimal | None, str | None, str | None] | None = None,
 ) -> InvestmentPositionResponse:
     invested = item.quantity * item.average_price
-    name, current_price, currency, source = quote or _quote(item, service)
+    quoted_name, current_price, currency, source = quote or _quote(item, service)
+    name = item.name or quoted_name
     currency = currency or ("BRL" if item.market == "br" else "USD")
     current_value = item.quantity * current_price if current_price is not None else None
     pnl = current_value - invested if current_value is not None else None
@@ -189,6 +193,7 @@ def create_investment_position(
     item = InvestmentPosition(
         client_id=client_id,
         symbol=payload.symbol.strip().upper(),
+        name=payload.name.strip() if payload.name and payload.name.strip() else None,
         market=payload.market,
         quantity=payload.quantity,
         average_price=payload.average_price,
@@ -221,7 +226,10 @@ def update_investment_position(
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if "symbol" in updates and isinstance(updates["symbol"], str):
+        updates["symbol"] = updates["symbol"].strip().upper()
+    for field, value in updates.items():
         setattr(item, field, value.strip() if isinstance(value, str) and value.strip() else (None if isinstance(value, str) else value))
     _audit(db, current_user, client_id, "update", item.id)
     db.commit()

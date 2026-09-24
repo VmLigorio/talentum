@@ -1,3 +1,6 @@
+# Talentum — ops/backup_postgres.sh
+# Responsabilidade: Automatiza uma rotina operacional de backup, restauração ou verificação do ambiente.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 #!/usr/bin/env bash
 set -euo pipefail
 

@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/auth.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 

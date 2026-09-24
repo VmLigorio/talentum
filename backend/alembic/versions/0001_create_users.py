@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0001_create_users.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create users table
 
 Revision ID: 0001_create_users
