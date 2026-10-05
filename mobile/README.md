@@ -14,17 +14,19 @@ flutter pub get
 O aplicativo mantém a sessão usando o refresh token em armazenamento seguro da plataforma; a senha não é armazenada no dispositivo.
 O cache local de dados financeiros também usa armazenamento seguro. Preferências visuais não sensíveis permanecem no armazenamento comum.
 
-O código já está preparado para consumir a API do Talentum. No Linux e no simulador iOS, usa `127.0.0.1`; em um emulador Android, usa `10.0.2.2` automaticamente:
+O código já está preparado para consumir a API do Talentum. No Linux e no simulador iOS, usa `127.0.0.1`; em um emulador Android, usa `10.0.2.2` automaticamente. O endereço padrão usa a porta `8000`:
 
 ```bash
 flutter run
 ```
 
-Em um dispositivo físico, informe o endereço acessível da API:
+No Android físico, `127.0.0.1` aponta para o próprio celular. Use o IP local do computador na mesma rede Wi-Fi e a porta publicada pela API. Por exemplo, para o Docker Compose local (`8001`):
 
 ```bash
-flutter run --dart-define=API_URL=http://127.0.0.1:8000
+flutter run --dart-define=API_URL=http://192.168.1.10:8001
 ```
+
+Substitua `192.168.1.10` pelo IP atual do computador. O manifesto de depuração permite HTTP para esses testes locais; builds Release continuam exigindo HTTPS.
 
 ## Escopo do MVP Mobile
 

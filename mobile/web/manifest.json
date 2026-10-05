@@ -1,11 +1,11 @@
 {
-    "name": "talentum_mobile",
-    "short_name": "talentum_mobile",
+    "name": "Talentum",
+    "short_name": "Talentum",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FAF9F6",
+    "theme_color": "#5D4BC4",
+    "description": "Planejamento financeiro com propósito.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

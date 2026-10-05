@@ -459,11 +459,29 @@ class ApiClient {
   Future<Map<String, dynamic>> submitSuitability({
     required String objective,
     required Map<String, String> answers,
+    required String financialDataVersion,
+    required bool confirmFinancialSituation,
   }) async =>
       Map<String, dynamic>.from(await _request(
         '/clients/me/suitability',
         method: 'POST',
-        body: {'objective': objective, 'answers': answers},
+        body: {
+          'objective': objective,
+          'answers': answers,
+          'financial_data_version': financialDataVersion,
+          'confirm_financial_situation': confirmFinancialSituation,
+        },
+      ) as Map);
+
+  Future<Map<String, dynamic>> respondToSuitability({
+    required int assessmentId,
+    required String response,
+    String? note,
+  }) async =>
+      Map<String, dynamic>.from(await _request(
+        '/clients/me/suitability/$assessmentId/response',
+        method: 'POST',
+        body: {'response': response, 'note': note},
       ) as Map);
 
   Future<Map<String, dynamic>> profile(int clientId) async =>

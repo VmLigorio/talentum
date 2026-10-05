@@ -233,9 +233,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text('talentum ✦',
-                          style: TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.w800)),
+                      Image.asset('assets/brand/talentum-web-logo.png',
+                          width: 200, height: 48),
                       const SizedBox(height: 28),
                       Text('Sua jornada financeira começa aqui.',
                           style: Theme.of(context).textTheme.headlineSmall),
@@ -540,10 +539,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _saveClientCache(
-      Map<String, dynamic> currentUser,
-      List<dynamic> results,
-      Map<String, dynamic>? currentSuitability) async {
+  Future<void> _saveClientCache(Map<String, dynamic> currentUser,
+      List<dynamic> results, Map<String, dynamic>? currentSuitability) async {
     try {
       await widget.api.secureStorage.write(
           clientCacheKey,
@@ -796,7 +793,8 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('talentum ✦'),
+        title: Image.asset('assets/brand/talentum-web-logo.png',
+            width: 136, height: 33),
         actions: [
           IconButton(
             tooltip: hideValues ? 'Exibir valores' : 'Ocultar valores',
@@ -1167,8 +1165,59 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final recommendation =
         Map<String, dynamic>.from(assessment['recommendation'] as Map? ?? {});
+    final assessmentAnswers = Map<String, dynamic>.from(
+        assessment['answers'] as Map? ?? <String, dynamic>{});
+    final financial = Map<String, dynamic>.from(
+      assessment['financial_situation'] as Map? ?? <String, dynamic>{},
+    );
+    final financialCategories = List<dynamic>.from(
+        financial['patrimony_by_category'] as List? ?? <dynamic>[]);
+    final financialGoals =
+        List<dynamic>.from(financial['active_goals'] as List? ?? <dynamic>[]);
+    final financialFlagLabels = <String, String>{
+      'monthly_surplus_not_positive':
+          'O saldo mensal cadastrado não é positivo.',
+      'active_goal_within_2_years':
+          'Existe uma meta com prazo nos próximos dois anos.',
+      'no_patrimony_items_recorded':
+          'Não havia itens de patrimônio cadastrados.',
+      'liabilities_not_recorded': 'Dívidas não estão incluídas neste resumo.',
+    };
+    final financialFlags =
+        List<dynamic>.from(financial['capacity_flags'] as List? ?? <dynamic>[]);
+    const knowledgeAnswerLabels = <String, String>{
+      'product_familiarity': 'Familiaridade com produtos',
+      'operation_products': 'Produtos já utilizados',
+      'operation_period': 'Tempo de experiência',
+      'operation_frequency': 'Frequência das operações',
+      'monthly_operation_volume': 'Volume mensal aproximado',
+      'financial_education': 'Formação ou experiência profissional',
+    };
+    const knowledgeOptionLabels = <String, String>{
+      'none': 'Nenhum / não realizou operações',
+      'fixed_income': 'Renda fixa',
+      'funds': 'Fundos de investimento',
+      'stocks_etfs': 'Ações e ETFs',
+      'fiis': 'Fundos imobiliários (FIIs)',
+      'derivatives_structured': 'Derivativos e produtos estruturados',
+      'under_1_year': 'Menos de 1 ano',
+      '1_to_3_years': 'De 1 a 3 anos',
+      'over_3_years': 'Mais de 3 anos',
+      'few_per_year': 'Algumas vezes por ano',
+      'monthly': 'Mensalmente',
+      'weekly_or_more': 'Semanalmente ou mais',
+      'under_1000': 'Até R\$ 1.000',
+      '1000_to_10000': 'De R\$ 1.000 a R\$ 10.000',
+      'over_10000': 'Acima de R\$ 10.000',
+      'prefer_not_to_say': 'Prefiro não informar',
+      'education': 'Curso ou formação relacionada',
+      'professional': 'Experiência profissional na área',
+      'both': 'Formação e experiência profissional',
+    };
     final allocations = List<dynamic>.from(
         recommendation['allocations'] as List? ?? <dynamic>[]);
+    final recommendedActions = List<dynamic>.from(
+        recommendation['recommended_actions'] as List? ?? <dynamic>[]);
     final status = assessment['status']?.toString() ?? 'pending_review';
     return Card(
       child: Padding(
@@ -1198,9 +1247,113 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('Status: ${suitabilityStatusLabel(status)}'),
             const SizedBox(height: 8),
             Text(assessment['risk_profile_description']?.toString() ?? ''),
+            if (financial['data_version'] != null) ...[
+              const SizedBox(height: 12),
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Situação financeira usada nesta avaliação',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text(
+                          'Renda mensal: ${privateMoney(financial['monthly_income'] ?? 0)}'),
+                      Text(
+                          'Despesas mensais: ${privateMoney(financial['monthly_expenses'] ?? 0)}'),
+                      Text(
+                          'Saldo mensal: ${privateMoney(financial['monthly_surplus'] ?? 0)}'),
+                      Text(
+                          'Patrimônio cadastrado, sem dívidas: ${privateMoney(financial['patrimony_total'] ?? 0)}'),
+                      if (financialCategories.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        ...financialCategories.map((entry) {
+                          final category =
+                              Map<String, dynamic>.from(entry as Map);
+                          return Text(
+                              '${category['category']}: ${privateMoney(category['value'] ?? 0)}');
+                        }),
+                      ],
+                      if (financialGoals.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                            'Metas ativas: ${financialGoals.map((entry) => Map<String, dynamic>.from(entry as Map)['title']).join(', ')}'),
+                      ],
+                      if (financialFlags.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text('Pontos considerados na revisão do Advisor:',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                        ...financialFlags.map((flag) => Text(
+                            '• ${financialFlagLabels[flag.toString()] ?? flag}')),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 8),
+              const Text(
+                  'Esta avaliação anterior não contém um registro financeiro confirmado.',
+                  style: TextStyle(fontSize: 12)),
+            ],
+            if (assessmentAnswers.containsKey('product_familiarity')) ...[
+              const SizedBox(height: 8),
+              Card(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Conhecimento e experiência informados',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      ...knowledgeAnswerLabels.entries.map((entry) {
+                        final values =
+                            (assessmentAnswers[entry.key]?.toString() ?? '')
+                                .split(',')
+                                .where((value) => value.isNotEmpty)
+                                .map((value) =>
+                                    knowledgeOptionLabels[value] ?? value)
+                                .join(', ');
+                        return Text(
+                            '${entry.value}: ${values.isEmpty ? 'Não informado' : values}');
+                      }),
+                      const SizedBox(height: 6),
+                      const Text(
+                          'As respostas ajudam o Advisor a revisar os produtos; não elevam automaticamente o perfil de risco.',
+                          style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (recommendation['summary'] != null) ...[
               const SizedBox(height: 8),
               Text(recommendation['summary'].toString()),
+            ],
+            if (recommendedActions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text('Próximas ações para validar a carteira',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              ...recommendedActions.map((entry) {
+                final action = Map<String, dynamic>.from(entry as Map);
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('• ${action['title']}',
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(action['detail'].toString(),
+                          style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                );
+              }),
             ],
             const Divider(height: 24),
             const Text('Alocação de referência',
@@ -1210,6 +1363,8 @@ class _HomeScreenState extends State<HomeScreen> {
               final allocation = Map<String, dynamic>.from(item as Map);
               final percentage =
                   int.tryParse(allocation['percentage']?.toString() ?? '') ?? 0;
+              final suballocations = List<dynamic>.from(
+                  allocation['suballocations'] as List? ?? <dynamic>[]);
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Column(
@@ -1226,15 +1381,62 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(value: percentage / 100),
+                    if (suballocations.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      ...suballocations.map((segment) {
+                        final details =
+                            Map<String, dynamic>.from(segment as Map);
+                        final examples = List<dynamic>.from(
+                            details['examples'] as List? ?? <dynamic>[]);
+                        return Padding(
+                          padding: const EdgeInsets.only(left: 10, top: 5),
+                          child: Text(
+                            '• ${details['label']} — ${details['percentage']}% da carteira${examples.isEmpty ? '' : '\n  Exemplos para análise: ${examples.join(', ')}'}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        );
+                      }),
+                    ],
                   ],
                 ),
               );
             }),
             const SizedBox(height: 8),
             const Text(
-              'Esta é uma carteira modelo por classes de ativos. A validação do Advisor é necessária antes de qualquer decisão.',
+              'Modelo educativo. Os ativos citados são exemplos para análise. A aprovação do Advisor não executa operações.',
               style: TextStyle(fontSize: 12),
             ),
+            if (status == 'approved') ...[
+              const SizedBox(height: 10),
+              Text(
+                  'Sua resposta: ${suitabilityClientResponseLabel(assessment['client_response'])}'),
+              if ((assessment['client_response_note']?.toString() ?? '')
+                  .isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child:
+                      Text('Observação: ${assessment['client_response_note']}'),
+                ),
+              if ((assessment['client_response']?.toString() ?? 'pending') ==
+                  'pending') ...[
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: () => respondToSuitability('accepted'),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Aceitar carteira-modelo'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => respondToSuitability('adjustment_requested'),
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Pedir ajustes'),
+                ),
+                TextButton.icon(
+                  onPressed: () => respondToSuitability('declined'),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Recusar proposta'),
+                ),
+              ],
+            ],
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: openSuitabilityQuestionnaire,
@@ -1254,6 +1456,84 @@ class _HomeScreenState extends State<HomeScreen> {
         _ => 'Aguardando validação do Advisor',
       };
 
+  String suitabilityClientResponseLabel(dynamic value) =>
+      switch (value?.toString()) {
+        'accepted' => 'Aceita pelo cliente',
+        'declined' => 'Recusada pelo cliente',
+        'adjustment_requested' => 'Ajustes solicitados',
+        _ => 'Aguardando sua resposta',
+      };
+
+  Future<void> respondToSuitability(String response) async {
+    final assessment = suitability;
+    if (assessment == null) return;
+    final noteController = TextEditingController();
+    final labels = {
+      'accepted': 'Aceitar esta carteira-modelo?',
+      'declined': 'Recusar esta proposta?',
+      'adjustment_requested': 'Solicitar ajustes ao Advisor?',
+    };
+    final confirmed = await showDialog<Map<String, String>?>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(labels[response] ?? 'Confirmar resposta'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Sua resposta será registrada para acompanhamento do Advisor. Nenhuma operação será realizada.',
+            ),
+            if (response != 'accepted') ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteController,
+                maxLength: 1000,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Observação (opcional)',
+                  hintText: 'Conte ao Advisor o que gostaria de mudar.',
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Voltar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, {
+              'note': noteController.text.trim(),
+            }),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    noteController.dispose();
+    if (confirmed == null || !mounted) return;
+    try {
+      final updated = await widget.api.respondToSuitability(
+        assessmentId: assessment['id'] as int,
+        response: response,
+        note: confirmed['note'],
+      );
+      if (!mounted) return;
+      setState(() => suitability = updated);
+      await widget.api.secureStorage.delete(clientCacheKey);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Resposta registrada. O Advisor poderá acompanhar seu retorno.'),
+        ));
+      }
+    } on ApiException catch (exception) {
+      if (mounted) showFormError(exception.message);
+    }
+  }
+
   // Abre o formulário completo e envia as respostas para a avaliação versionada.
   Future<void> openSuitabilityQuestionnaire() async {
     Map<String, dynamic> definition;
@@ -1264,14 +1544,26 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    final objectives = List<dynamic>.from(
-        definition['objectives'] as List? ?? <dynamic>[]);
-    final questions = List<dynamic>.from(
-        definition['questions'] as List? ?? <dynamic>[]);
+    final objectives =
+        List<dynamic>.from(definition['objectives'] as List? ?? <dynamic>[]);
+    final questions =
+        List<dynamic>.from(definition['questions'] as List? ?? <dynamic>[]);
+    final financialSituation = Map<String, dynamic>.from(
+      definition['financial_situation'] as Map? ?? <String, dynamic>{},
+    );
+    final financialDataVersion =
+        financialSituation['data_version']?.toString() ?? '';
+    final hasFinancialProfile =
+        financialSituation['has_financial_profile'] == true;
+    final patrimonyByCategory = List<dynamic>.from(
+        financialSituation['patrimony_by_category'] as List? ?? <dynamic>[]);
+    final activeGoals = List<dynamic>.from(
+        financialSituation['active_goals'] as List? ?? <dynamic>[]);
     if (objectives.isEmpty || questions.isEmpty) {
       if (mounted) showFormError('O questionário ainda não está disponível.');
       return;
     }
+    if (!mounted) return;
     var objective = suitability?['objective']?.toString() ??
         Map<String, dynamic>.from(objectives.first as Map)['value'].toString();
     final answers = <String, String>{};
@@ -1286,6 +1578,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (dialogContext) {
         var submitting = false;
+        var financialConfirmed = false;
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
             title: const Text('Perfil e carteira sugerida'),
@@ -1300,20 +1593,82 @@ class _HomeScreenState extends State<HomeScreen> {
                       'Escolha seu objetivo principal e responda com base na sua situação atual. Não existem respostas certas ou erradas.',
                     ),
                     const SizedBox(height: 16),
+                    Card(
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Sua situação financeira',
+                                style: Theme.of(context).textTheme.titleMedium),
+                            const SizedBox(height: 8),
+                            Text(
+                                'Renda mensal: ${privateMoney(financialSituation['monthly_income'] ?? 0)}'),
+                            Text(
+                                'Despesas mensais: ${privateMoney(financialSituation['monthly_expenses'] ?? 0)}'),
+                            Text(
+                                'Saldo mensal: ${privateMoney(financialSituation['monthly_surplus'] ?? 0)}'),
+                            Text(
+                                'Patrimônio cadastrado (sem dívidas): ${privateMoney(financialSituation['patrimony_total'] ?? 0)}'),
+                            if (patrimonyByCategory.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              ...patrimonyByCategory.map((entry) {
+                                final category =
+                                    Map<String, dynamic>.from(entry as Map);
+                                return Text(
+                                    '${category['category']}: ${privateMoney(category['value'] ?? 0)}');
+                              }),
+                            ] else
+                              const Text(
+                                  'Nenhum item de patrimônio cadastrado.'),
+                            const SizedBox(height: 6),
+                            Text(activeGoals.isEmpty
+                                ? 'Nenhuma meta ativa cadastrada.'
+                                : 'Metas ativas: ${activeGoals.map((entry) => Map<String, dynamic>.from(entry as Map)['title']).join(', ')}'),
+                            if (!hasFinancialProfile) ...[
+                              const SizedBox(height: 8),
+                              const Text(
+                                  'Seu perfil financeiro ainda não foi cadastrado. Peça ao Advisor para preenchê-lo antes de continuar.'),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: financialConfirmed,
+                      onChanged: submitting || !hasFinancialProfile
+                          ? null
+                          : (value) => setDialogState(
+                              () => financialConfirmed = value ?? false),
+                      title: const Text(
+                          'Confirmo que renda, despesas, patrimônio e metas exibidos estão atualizados. Se algo estiver faltando, pedirei ao Advisor para corrigir antes de gerar.'),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                    const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
+                      isExpanded: true,
                       initialValue: objective,
-                      decoration:
-                          const InputDecoration(labelText: 'Objetivo principal'),
-                      items: objectives
-                          .map((item) {
-                            final value =
-                                Map<String, dynamic>.from(item as Map);
-                            return DropdownMenuItem<String>(
-                              value: value['value'].toString(),
-                              child: Text(value['label'].toString()),
-                            );
-                          })
-                          .toList(),
+                      decoration: const InputDecoration(
+                        label: Text(
+                          'Objetivo principal',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      items: objectives.map((item) {
+                        final value = Map<String, dynamic>.from(item as Map);
+                        return DropdownMenuItem<String>(
+                          value: value['value'].toString(),
+                          child: Text(
+                            value['label'].toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
                       onChanged: submitting
                           ? null
                           : (value) => setDialogState(
@@ -1333,24 +1688,111 @@ class _HomeScreenState extends State<HomeScreen> {
                       final selected = optionValues.contains(answers[key])
                           ? answers[key]
                           : null;
+                      if (question['selection_mode'] == 'multiple') {
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 14),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16),
+                                  child: Text(
+                                    question['label'].toString(),
+                                    style:
+                                        Theme.of(context).textTheme.titleSmall,
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 4),
+                                  child: Text(
+                                    question['description']?.toString() ?? '',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ),
+                                ...options.map((option) {
+                                  final choice =
+                                      Map<String, dynamic>.from(option as Map);
+                                  final value = choice['value'].toString();
+                                  final selectedValues = (answers[key] ?? '')
+                                      .split(',')
+                                      .where((entry) => entry.isNotEmpty)
+                                      .toSet();
+                                  return CheckboxListTile(
+                                    dense: true,
+                                    value: selectedValues.contains(value),
+                                    title: Text(choice['label'].toString()),
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    onChanged: submitting
+                                        ? null
+                                        : (checked) => setDialogState(() {
+                                              if (value == 'none' &&
+                                                  checked == true) {
+                                                selectedValues
+                                                  ..clear()
+                                                  ..add('none');
+                                              } else {
+                                                selectedValues.remove('none');
+                                                if (checked == true) {
+                                                  selectedValues.add(value);
+                                                } else {
+                                                  selectedValues.remove(value);
+                                                }
+                                              }
+                                              if (selectedValues.isEmpty) {
+                                                answers.remove(key);
+                                              } else {
+                                                final ordered = options
+                                                    .map((entry) => Map<String,
+                                                                dynamic>.from(
+                                                            entry
+                                                                as Map)['value']
+                                                        .toString())
+                                                    .where(
+                                                        selectedValues.contains)
+                                                    .toList();
+                                                answers[key] =
+                                                    ordered.join(',');
+                                              }
+                                            }),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 14),
                         child: DropdownButtonFormField<String>(
+                          isExpanded: true,
                           initialValue: selected,
                           decoration: InputDecoration(
-                            labelText: question['label'].toString(),
+                            label: Text(
+                              question['label'].toString(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                             helperText: question['description']?.toString(),
+                            helperMaxLines: 2,
                           ),
-                          items: options
-                              .map((option) {
-                                final value =
-                                    Map<String, dynamic>.from(option as Map);
-                                return DropdownMenuItem<String>(
-                                  value: value['value'].toString(),
-                                  child: Text(value['label'].toString()),
-                                );
-                              })
-                              .toList(),
+                          items: options.map((option) {
+                            final value =
+                                Map<String, dynamic>.from(option as Map);
+                            return DropdownMenuItem<String>(
+                              value: value['value'].toString(),
+                              child: Text(
+                                value['label'].toString(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }).toList(),
                           onChanged: submitting
                               ? null
                               : (value) => setDialogState(() {
@@ -1363,9 +1805,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     }),
-                    const Text(
-                      'A carteira exibida é uma referência por classe de ativo e ficará pendente de validação do Advisor.',
-                      style: TextStyle(fontSize: 12),
+                    Text(
+                      definition['disclaimer']?.toString() ??
+                          'Carteira educativa; aguarde a validação do Advisor antes de tomar decisões.',
+                      style: const TextStyle(fontSize: 12),
                     ),
                   ],
                 ),
@@ -1373,11 +1816,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: submitting ? null : () => Navigator.pop(dialogContext),
+                onPressed:
+                    submitting ? null : () => Navigator.pop(dialogContext),
                 child: const Text('Cancelar'),
               ),
               FilledButton(
-                onPressed: submitting || answers.length != questions.length
+                onPressed: submitting ||
+                        !hasFinancialProfile ||
+                        !financialConfirmed ||
+                        answers.length != questions.length
                     ? null
                     : () async {
                         setDialogState(() => submitting = true);
@@ -1385,6 +1832,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           final submitted = await widget.api.submitSuitability(
                             objective: objective,
                             answers: answers,
+                            financialDataVersion: financialDataVersion,
+                            confirmFinancialSituation: financialConfirmed,
                           );
                           if (!dialogContext.mounted) return;
                           Navigator.pop(dialogContext, submitted);
@@ -1423,7 +1872,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Widget _marketAlertTile(Map<String, dynamic> alert) {
+  Widget _marketAlertTile(Map<String, dynamic> alert, {VoidCallback? onEdit}) {
     final status = alert['status']?.toString();
     final editable = status != 'cancelled';
     return ListTile(
@@ -1437,14 +1886,16 @@ class _HomeScreenState extends State<HomeScreen> {
       title: Text('${alert['symbol']} · ${alertPrice(alert)}'),
       subtitle: Text(
           '${marketAlertConditionLabel(alert['condition'])} · ${marketAlertStatusLabel(status)}'),
-      onTap: editable ? () => openMarketAlertDialog(alert: alert) : null,
+      onTap: editable
+          ? (onEdit ?? () => openMarketAlertDialog(alert: alert))
+          : null,
       trailing: Wrap(
         spacing: 0,
         children: [
           if (editable)
             IconButton(
               tooltip: 'Editar alerta',
-              onPressed: () => openMarketAlertDialog(alert: alert),
+              onPressed: onEdit ?? () => openMarketAlertDialog(alert: alert),
               icon: const Icon(Icons.edit_outlined),
             ),
           if (status == 'active' || status == 'paused')
@@ -1459,7 +1910,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> openMarketAlertsHistory() async {
-    await showDialog<void>(
+    final selectedAlert = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Alertas de preço'),
@@ -1469,10 +1920,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ? const Text('Nenhum alerta cadastrado.')
               : ListView(
                   shrinkWrap: true,
-                  children: marketAlerts
-                      .map((alert) =>
-                          _marketAlertTile(Map<String, dynamic>.from(alert)))
-                      .toList(),
+                  children: marketAlerts.map((alert) {
+                    final item = Map<String, dynamic>.from(alert);
+                    return _marketAlertTile(
+                      item,
+                      // Fecha o histórico antes de abrir o editor para evitar rotas
+                      // de diálogo sobrepostas durante a desmontagem no Navigator.
+                      onEdit: () => Navigator.pop(dialogContext, item),
+                    );
+                  }).toList(),
                 ),
         ),
         actions: [
@@ -1483,6 +1939,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+    if (selectedAlert != null && mounted) {
+      await openMarketAlertDialog(alert: selectedAlert);
+    }
   }
 
   Future<void> openMarketAlertDialog({Map<String, dynamic>? alert}) async {
@@ -1495,6 +1954,7 @@ class _HomeScreenState extends State<HomeScreen> {
     var condition = editing
         ? alert['condition']?.toString() ?? 'at_or_below'
         : 'at_or_below';
+    var saving = false;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -1507,15 +1967,16 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 TextField(
                     controller: symbol,
-                    readOnly: editing,
+                    readOnly: editing || saving,
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
                         labelText: 'Ticker ou símbolo',
                         hintText: 'PETR4 ou AAPL')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: market,
-                  onChanged: editing
+                  onChanged: editing || saving
                       ? null
                       : (value) => setDialogState(() => market = value ?? 'br'),
                   decoration: const InputDecoration(labelText: 'Mercado'),
@@ -1527,12 +1988,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
                 TextField(
                     controller: target,
+                    enabled: !saving,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(
                         labelText: 'Preço-alvo', hintText: 'Ex.: 32,50')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
+                    isExpanded: true,
                     initialValue: condition,
                     decoration: const InputDecoration(labelText: 'Condição'),
                     items: const [
@@ -1543,55 +2006,85 @@ class _HomeScreenState extends State<HomeScreen> {
                           value: 'at_or_above',
                           child: Text('Atingir ou superar'))
                     ],
-                    onChanged: (value) => setDialogState(
-                        () => condition = value ?? 'at_or_below')),
+                    onChanged: saving
+                        ? null
+                        : (value) => setDialogState(
+                            () => condition = value ?? 'at_or_below')),
               ],
             ),
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
+                onPressed: saving ? null : () => Navigator.pop(dialogContext),
                 child: const Text('Cancelar')),
             FilledButton(
-              onPressed: () async {
-                final parsedTarget = parseBrazilianNumber(target.text);
-                if (symbol.text.trim().isEmpty ||
-                    parsedTarget == null ||
-                    parsedTarget <= 0) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                      const SnackBar(
-                          content:
-                              Text('Informe o ativo e um preço-alvo válido.')));
-                  return;
-                }
-                try {
-                  if (editing) {
-                    await widget.api.updateMarketAlert(
-                      alert['id'] as int,
-                      targetPrice: parsedTarget,
-                      condition: condition,
-                    );
-                  } else {
-                    await widget.api.createMarketAlert(
-                        symbol: symbol.text.trim().toUpperCase(),
-                        market: market,
-                        targetPrice: parsedTarget,
-                        condition: condition);
-                  }
-                  if (!mounted || !dialogContext.mounted) return;
-                  Navigator.pop(dialogContext);
-                  final messenger = ScaffoldMessenger.of(context);
-                  await load();
-                  if (mounted)
-                    messenger.showSnackBar(const SnackBar(
-                        content: Text('Alerta salvo com sucesso.')));
-                } on ApiException catch (exception) {
-                  if (dialogContext.mounted)
-                    ScaffoldMessenger.of(dialogContext).showSnackBar(
-                        SnackBar(content: Text(exception.message)));
-                }
-              },
-              child: Text(editing ? 'Salvar alterações' : 'Criar alerta'),
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final parsedTarget = parseBrazilianNumber(target.text);
+                      if (symbol.text.trim().isEmpty ||
+                          parsedTarget == null ||
+                          parsedTarget <= 0) {
+                        ScaffoldMessenger.of(dialogContext).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Informe o ativo e um preço-alvo válido.'),
+                          ),
+                        );
+                        return;
+                      }
+                      if (saving) return;
+                      saving = true;
+                      try {
+                        setDialogState(() {});
+                        if (editing) {
+                          await widget.api.updateMarketAlert(
+                            alert['id'] as int,
+                            targetPrice: parsedTarget,
+                            condition: condition,
+                          );
+                        } else {
+                          await widget.api.createMarketAlert(
+                            symbol: symbol.text.trim().toUpperCase(),
+                            market: market,
+                            targetPrice: parsedTarget,
+                            condition: condition,
+                          );
+                        }
+                        if (!mounted || !dialogContext.mounted) return;
+                        Navigator.pop(dialogContext);
+                        final messenger = ScaffoldMessenger.of(context);
+                        await load();
+                        if (mounted) {
+                          messenger.showSnackBar(const SnackBar(
+                            content: Text('Alerta salvo com sucesso.'),
+                          ));
+                        }
+                      } on ApiException catch (exception) {
+                        if (dialogContext.mounted) {
+                          setDialogState(() => saving = false);
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            SnackBar(content: Text(exception.message)),
+                          );
+                        }
+                      } catch (_) {
+                        if (dialogContext.mounted) {
+                          setDialogState(() => saving = false);
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Não foi possível salvar o alerta. Tente novamente.',
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              child: Text(saving
+                  ? 'Salvando...'
+                  : editing
+                      ? 'Salvar alterações'
+                      : 'Criar alerta'),
             ),
           ],
         ),
