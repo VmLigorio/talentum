@@ -7,12 +7,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Talentum Advisor</title>
+    <link rel="icon" type="image/svg+xml" href="assets/talentum-app-icon.svg">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <main id="login-view" class="login-view">
       <section class="login-card">
-        <p class="eyebrow">talentum advisor</p>
+        <img class="login-logo" src="assets/talentum-web-logo.svg" alt="talentum" width="200" height="48">
+        <p class="eyebrow">Portal Advisor</p>
         <h1>Decisões melhores começam com contexto.</h1>
         <p class="muted">Acompanhe clientes, patrimônio, metas e relatórios em um só lugar.</p>
         <p id="api-status" class="api-status">Verificando conexão com a API...</p>
@@ -29,7 +31,7 @@
 
     <main id="app-view" class="app-view hidden">
       <header class="topbar">
-        <div class="brand">talentum<span>✦</span></div>
+        <div class="brand"><img src="assets/talentum-web-logo.svg" alt="talentum" width="200" height="48"></div>
         <div class="topbar-actions"><span id="current-user" class="muted"></span><button id="notifications" class="button ghost">Alertas <span id="notification-count">0</span></button><button id="manage-team" class="button ghost hidden">Equipe</button><button id="new-user" class="button ghost hidden">Novo usuário</button><button id="change-password" class="button ghost">Alterar senha</button><button id="logout" class="button ghost">Sair</button></div>
       </header>
       <div class="workspace">
@@ -135,7 +137,7 @@
               <div id="investment-history-list" class="investment-history-list"></div>
             </section>
             <section class="panel financial-panel"><div class="panel-heading"><div><p class="eyebrow">contexto financeiro</p><h2>Perfil financeiro</h2></div><button id="save-financial-profile" class="button primary small">Salvar</button></div><form id="financial-form" class="financial-form"><div class="financial-fields"><label>Renda mensal<input id="monthly-income" type="number" min="0" step="0.01" required></label><label>Despesas mensais<input id="monthly-expenses" type="number" min="0" step="0.01" required></label><label>Perfil de risco<input id="risk-profile" maxlength="30" placeholder="Ex.: moderado"></label></div><p id="financial-status" class="feedback"></p></form></section>
-            <section class="panel suitability-panel"><div class="panel-heading"><div><p class="eyebrow">suitability</p><h2>Carteira sugerida</h2></div><span class="muted">questionário do cliente</span></div><div id="suitability-empty" class="empty-line">O cliente ainda não respondeu ao questionário.</div><div id="suitability-content" class="hidden"><div id="suitability-summary" class="suitability-summary"></div><p id="suitability-recommendation" class="muted"></p><div id="suitability-allocations" class="suitability-allocations"></div><p id="suitability-status" class="feedback"></p><div class="suitability-actions"><button id="suitability-approve" class="button primary small" type="button">Aprovar carteira</button><button id="suitability-reject" class="button ghost small" type="button">Solicitar nova avaliação</button></div></div></section>
+            <section class="panel suitability-panel"><div class="panel-heading"><div><p class="eyebrow">suitability</p><h2>Carteira sugerida</h2></div><span class="muted">questionário do cliente</span></div><div id="suitability-empty" class="empty-line">O cliente ainda não respondeu ao questionário.</div><div id="suitability-content" class="hidden"><div id="suitability-summary" class="suitability-summary"></div><p id="suitability-recommendation" class="muted"></p><div id="suitability-recommended-actions" class="suitability-financial-context"></div><div id="suitability-financial-context" class="suitability-financial-context"></div><div id="suitability-knowledge-context" class="suitability-financial-context"></div><div id="suitability-allocations" class="suitability-allocations"></div><p id="suitability-status" class="feedback"></p><div class="suitability-actions"><button id="suitability-approve" class="button primary small" type="button">Aprovar carteira</button><button id="suitability-reject" class="button ghost small" type="button">Solicitar nova avaliação</button></div></div></section>
               <section class="panel profile-panel"><div class="panel-heading"><div><p class="eyebrow">cadastro</p><h2>Dados do cliente</h2></div><button id="save-client-profile" class="button primary small">Salvar</button></div><form id="client-profile-form" class="financial-form"><div class="financial-fields"><label>Nome<input id="client-profile-name" maxlength="120" required></label><label>Telefone<input id="client-profile-phone" maxlength="30" placeholder="(00) 00000-0000"></label><label>Status<input id="client-profile-status" disabled></label></div><div class="financial-fields"><label>Nome do pai<input id="client-profile-father" maxlength="120"></label><label>Nome da mãe<input id="client-profile-mother" maxlength="120"></label></div><div class="financial-fields"><label>Rua<input id="client-profile-street" maxlength="160"></label><label>Número<input id="client-profile-number" maxlength="30"></label><label>Cidade<input id="client-profile-city" maxlength="100"></label><label>CEP<input id="client-profile-zip" maxlength="20"></label><label>Estado<input id="client-profile-state" maxlength="60"></label></div><p id="client-profile-status-message" class="feedback"></p></form></section>
             <section id="assignment-panel" class="panel profile-panel hidden"><div class="panel-heading"><div><p class="eyebrow">operação</p><h2>Advisor responsável</h2></div><button id="save-assignment" class="button primary small">Salvar</button></div><form id="assignment-form" class="financial-form"><label>Advisor<select id="advisor-assignment"><option value="">Sem Advisor vinculado</option></select></label><button id="toggle-client-access" class="button ghost" type="button">Desativar acesso</button><button id="reset-client-password" class="button ghost" type="button">Redefinir senha do cliente</button><p id="assignment-status" class="feedback"></p></form></section>
             <div class="two-column">

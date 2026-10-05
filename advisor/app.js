@@ -1133,12 +1133,81 @@ function renderSuitability(assessment) {
   show("suitability-content", Boolean(assessment));
   if (!assessment) return;
   const statusLabels = { pending_review: "Aguardando validação", approved: "Aprovada", rejected: "Nova avaliação solicitada", superseded: "Substituída" };
+  const clientResponseLabels = { pending: "Aguardando resposta do cliente", accepted: "Aceita pelo cliente", declined: "Recusada pelo cliente", adjustment_requested: "Ajustes solicitados pelo cliente" };
   const recommendation = assessment.recommendation || {};
-  $("suitability-summary").innerHTML = `<div><small>Objetivo</small><strong>${escapeHtml(assessment.objective_label)}</strong></div><div><small>Perfil de risco</small><strong>${escapeHtml(assessment.risk_profile_label)}</strong></div><div><small>Pontuação</small><strong>${escapeHtml(assessment.score)}</strong></div><div><small>Status</small><strong>${escapeHtml(statusLabels[assessment.status] || assessment.status)}</strong></div>`;
+  const financial = assessment.financial_situation || {};
+  $("suitability-summary").innerHTML = `<div><small>Objetivo</small><strong>${escapeHtml(assessment.objective_label)}</strong></div><div><small>Perfil indicado pelas respostas</small><strong>${escapeHtml(assessment.risk_profile_label)}</strong></div><div><small>Pontuação</small><strong>${escapeHtml(assessment.score)}</strong></div><div><small>Status</small><strong>${escapeHtml(statusLabels[assessment.status] || assessment.status)}</strong></div>`;
   $("suitability-recommendation").textContent = `${recommendation.title || "Carteira sugerida"}. ${recommendation.summary || ""}`;
-  $("suitability-allocations").innerHTML = (recommendation.allocations || []).map((allocation) => `<div class="suitability-allocation"><div class="row-top"><strong>${escapeHtml(allocation.label)}</strong><span>${escapeHtml(allocation.percentage)}%</span></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, Number(allocation.percentage || 0)))}%"></i></div><small class="muted">${escapeHtml(allocation.rationale)}</small></div>`).join("");
+  const recommendedActions = recommendation.recommended_actions || [];
+  $("suitability-recommended-actions").innerHTML = recommendedActions.length
+    ? `<h3>Próximas ações para validar a carteira</h3><ul>${recommendedActions.map((action) => `<li><strong>${escapeHtml(action.title)}</strong><br><span class="muted">${escapeHtml(action.detail)}</span></li>`).join("")}</ul>`
+    : "";
+  $("suitability-recommended-actions").classList.toggle("hidden", !recommendedActions.length);
+  const financialFlags = {
+    monthly_surplus_not_positive: "Saldo mensal cadastrado não é positivo.",
+    active_goal_within_2_years: "Há meta ativa com prazo nos próximos dois anos.",
+    no_patrimony_items_recorded: "Nenhum item de patrimônio foi cadastrado.",
+    liabilities_not_recorded: "O Talentum não registra dívidas ou outros passivos.",
+  };
+  const categoryRows = (financial.patrimony_by_category || []).map((item) => `<li>${escapeHtml(item.category)}: ${money(item.value)}</li>`).join("");
+  const goalRows = (financial.active_goals || []).map((goal) => `<li>${escapeHtml(goal.title)}: ${money(goal.current_value)} de ${money(goal.target_value)}${goal.target_date ? ` · prazo ${formatDate(goal.target_date)}` : ""}</li>`).join("");
+  const flags = [...new Set([...(financial.capacity_flags || []), ...(recommendation.financial_review_flags || [])])];
+  const flagList = flags.length ? `<ul>${flags.map((flag) => `<li>${escapeHtml(financialFlags[flag] || flag)}</li>`).join("")}</ul>` : "";
+  $("suitability-financial-context").innerHTML = financial.data_version
+    ? `<h3>Situação financeira confirmada pelo cliente</h3><div class="suitability-financial-grid"><span>Renda mensal<strong>${money(financial.monthly_income)}</strong></span><span>Despesas mensais<strong>${money(financial.monthly_expenses)}</strong></span><span>Saldo mensal<strong>${money(financial.monthly_surplus)}</strong></span><span>Patrimônio cadastrado, sem passivos<strong>${money(financial.patrimony_total)}</strong></span></div><p><strong>Patrimônio por categoria</strong></p>${categoryRows ? `<ul>${categoryRows}</ul>` : '<p class="muted">Nenhum item cadastrado.</p>'}<p><strong>Metas ativas</strong></p>${goalRows ? `<ul>${goalRows}</ul>` : '<p class="muted">Nenhuma meta ativa cadastrada.</p>'}${flagList ? `<div class="suitability-financial-flags"><strong>Pontos para revisar</strong>${flagList}</div>` : ""}<small class="muted">Dados confirmados em ${financial.client_confirmed_at ? formatDate(financial.client_confirmed_at) : "data não informada"}.</small>`
+    : '<p class="muted">Esta avaliação anterior não contém um registro financeiro confirmado.</p>';
+  const answerLabels = {
+    product_familiarity: "Familiaridade com produtos",
+    operation_products: "Produtos já utilizados",
+    operation_period: "Tempo de experiência",
+    operation_frequency: "Frequência das operações",
+    monthly_operation_volume: "Volume mensal aproximado",
+    financial_education: "Formação ou experiência profissional",
+  };
+  const optionLabels = {
+    none: "Nenhum / não realizou operações",
+    fixed_income: "Renda fixa",
+    funds: "Fundos de investimento",
+    stocks_etfs: "Ações e ETFs",
+    fiis: "Fundos imobiliários (FIIs)",
+    derivatives_structured: "Derivativos e produtos estruturados",
+    under_1_year: "Menos de 1 ano",
+    "1_to_3_years": "De 1 a 3 anos",
+    over_3_years: "Mais de 3 anos",
+    few_per_year: "Algumas vezes por ano",
+    monthly: "Mensalmente",
+    weekly_or_more: "Semanalmente ou mais",
+    under_1000: "Até R$ 1.000",
+    "1000_to_10000": "De R$ 1.000 a R$ 10.000",
+    over_10000: "Acima de R$ 10.000",
+    prefer_not_to_say: "Prefere não informar",
+    education: "Curso ou formação relacionada",
+    professional: "Experiência profissional na área",
+    both: "Formação e experiência profissional",
+  };
+  const experienceRows = Object.entries(answerLabels).map(([key, label]) => {
+    const raw = assessment.answers?.[key];
+    const values = String(raw || "").split(",").filter(Boolean);
+    const display = values.map((value) => optionLabels[value] || value).join(", ") || "Não informado";
+    return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(display)}</li>`;
+  }).join("");
+  const experienceFlags = (recommendation.knowledge_review_flags || []).map((flag) => {
+    const messages = {
+      no_prior_market_operations_reported: "O cliente declarou não ter realizado operações anteriormente.",
+      review_familiarity_with_recommended_products: "Confira a familiaridade do cliente com as classes sugeridas.",
+      no_financial_education_or_professional_experience_reported: "O cliente não relatou formação ou experiência profissional financeira.",
+    };
+    return `<li>${escapeHtml(messages[flag] || flag)}</li>`;
+  }).join("");
+  $("suitability-knowledge-context").innerHTML = `<h3>Conhecimento e histórico relatados</h3><ul>${experienceRows}</ul>${experienceFlags ? `<div class="suitability-financial-flags"><strong>Pontos para revisar</strong><ul>${experienceFlags}</ul></div>` : ""}<small class="muted">Essas respostas são apresentadas para análise do Advisor; não aumentam automaticamente o perfil de risco.</small>`;
+  $("suitability-allocations").innerHTML = (recommendation.allocations || []).map((allocation) => {
+    const segments = (allocation.suballocations || []).map((segment) => `<div class="suitability-segment"><div class="row-top"><span>${escapeHtml(segment.label)}</span><strong>${escapeHtml(segment.percentage)}%</strong></div><small class="muted">Exemplos para análise: ${escapeHtml((segment.examples || []).join(", "))}. ${escapeHtml(segment.rationale)}</small></div>`).join("");
+    return `<div class="suitability-allocation"><div class="row-top"><strong>${escapeHtml(allocation.label)}</strong><span>${escapeHtml(allocation.percentage)}%</span></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, Number(allocation.percentage || 0)))}%"></i></div><small class="muted">${escapeHtml(allocation.rationale)}</small>${segments}</div>`;
+  }).join("");
   const expiryLabel = assessment.expires_at ? new Intl.DateTimeFormat("pt-BR").format(new Date(assessment.expires_at)) : "não informada";
-  setFeedback("suitability-status", `${statusLabels[assessment.status] || assessment.status}. Validade: ${expiryLabel}`);
+  const clientResponse = clientResponseLabels[assessment.client_response] || clientResponseLabels.pending;
+  const responseNote = assessment.client_response_note ? ` · Observação: ${assessment.client_response_note}` : "";
+  setFeedback("suitability-status", `${statusLabels[assessment.status] || assessment.status}. ${clientResponse}${responseNote}. Validade: ${expiryLabel}`);
   $("suitability-approve").disabled = assessment.status === "approved";
   $("suitability-reject").disabled = assessment.status === "rejected";
 }

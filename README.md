@@ -117,6 +117,8 @@ cd backend
 alembic upgrade head
 ```
 
+Ao executar a API diretamente no host, use o `.env.example` do backend: o Compose publica o PostgreSQL na porta `5433` do host. Dentro do Compose, a API usa o nome do serviço `postgres` e a porta interna `5432`.
+
 Para subir PostgreSQL e a API juntos pelo Docker Compose:
 
 ```bash
@@ -190,6 +192,8 @@ cache curto, retry de transporte, observabilidade segura por request ID e crité
 cd backend
 pytest
 ```
+
+Os testes de integração de autorização usam PostgreSQL e exigem `TEST_DATABASE_URL` apontando para um banco descartável cujo nome termine em `_test` ou `_testing`. Nunca aponte essa variável para o banco de desenvolvimento ou produção. A CI sobe um PostgreSQL temporário e aplica as migrations antes dos testes; sem essa variável, os testes de integração são pulados.
 
 ## Status do MVP
 

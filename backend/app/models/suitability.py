@@ -24,11 +24,19 @@ class SuitabilityAssessment(Base):
     score: Mapped[int] = mapped_column(Integer, nullable=False)
     answers: Mapped[dict] = mapped_column(JSONB, nullable=False)
     recommendation: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    financial_situation_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default="pending_review",
         server_default=text("'pending_review'"),
+    )
+    client_response: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    client_response_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    client_response_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

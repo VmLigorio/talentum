@@ -3,7 +3,7 @@
 # Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,11 +12,11 @@ from app.db.database import get_db
 from app.models import User
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     credentials_error = HTTPException(
@@ -24,6 +24,9 @@ def get_current_user(
         detail="Credenciais inválidas",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if credentials is None:
+        raise credentials_error
+    token = credentials.credentials
     try:
         payload = decode_token(token, "access")
         user_id = int(payload["sub"])
