@@ -30,7 +30,7 @@ docker exec \
 docker exec -i \
   -e "PGPASSWORD=$POSTGRES_PASSWORD" \
   "$container_name" \
-  pg_restore --list - < "$temporary_file" > /dev/null
+  pg_restore --list < "$temporary_file" > /dev/null
 
 mv -- "$temporary_file" "$backup_file"
 sha256sum "$backup_file" > "$backup_file.sha256"
