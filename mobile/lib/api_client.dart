@@ -230,9 +230,28 @@ class ApiClient {
       Map<String, dynamic>.from(await _request(
           '/clients/$clientId/investment-monthly-performance') as Map);
 
-  Future<List<dynamic>> investmentTransactions(int clientId) async =>
-      List<dynamic>.from(await _request(
-          '/clients/$clientId/investment-transactions?limit=100') as List);
+  Future<List<dynamic>> investmentTransactions(
+    int clientId, {
+    String? symbol,
+    String? operationType,
+    String? dateFrom,
+    String? dateTo,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final query = <String, String>{'limit': '$limit', 'offset': '$offset'};
+    if (symbol != null && symbol.trim().isNotEmpty) {
+      query['symbol'] = symbol.trim().toUpperCase();
+    }
+    if (operationType != null && operationType.isNotEmpty) {
+      query['operation_type'] = operationType;
+    }
+    if (dateFrom != null) query['date_from'] = dateFrom;
+    if (dateTo != null) query['date_to'] = dateTo;
+    final queryString = Uri(queryParameters: query).query;
+    return List<dynamic>.from(await _request(
+        '/clients/$clientId/investment-transactions?$queryString') as List);
+  }
 
   Future<List<dynamic>> patrimony(int clientId) async => List<dynamic>.from(
       await _request('/clients/$clientId/patrimony') as List);

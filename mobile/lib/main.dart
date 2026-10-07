@@ -586,6 +586,10 @@ class _HomeScreenState extends State<HomeScreen> {
   int tab = 0;
   String goalFilter = 'all';
   String notificationFilter = 'all';
+  String investmentTransactionPeriod = 'all';
+  String investmentTransactionType = 'all';
+  final TextEditingController investmentTransactionSymbolController =
+      TextEditingController();
   bool hideValues = false;
   Map<String, dynamic>? user;
   Map<String, dynamic>? dashboard;
@@ -609,6 +613,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool loading = false;
   bool documentBusy = false;
   bool investmentReportBusy = false;
+  bool investmentTransactionsBusy = false;
+  bool investmentTransactionsHasMore = false;
+  String? investmentTransactionsError;
   bool biometricAvailable = false;
   bool biometricEnabled = false;
   String? cachedAt;
@@ -630,6 +637,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     monthlyPerformanceTimer?.cancel();
+    investmentTransactionSymbolController.dispose();
     super.dispose();
   }
 
@@ -679,6 +687,108 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  String _transactionApiDate(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  Future<List<dynamic>> _loadInvestmentTransactions(int clientId,
+      {int offset = 0}) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final DateTime? dateFrom = switch (investmentTransactionPeriod) {
+      '30d' => today.subtract(const Duration(days: 29)),
+      '90d' => today.subtract(const Duration(days: 89)),
+      'ytd' => DateTime(today.year),
+      _ => null,
+    };
+    final operationType = investmentTransactionType == 'all'
+        ? null
+        : investmentTransactionType;
+    return widget.api.investmentTransactions(
+      clientId,
+      symbol: investmentTransactionSymbolController.text,
+      operationType: operationType,
+      dateFrom: dateFrom == null ? null : _transactionApiDate(dateFrom),
+      dateTo: dateFrom == null ? null : _transactionApiDate(today),
+      offset: offset,
+    );
+  }
+
+  Future<void> refreshInvestmentTransactions() async {
+    final clientId = user?['id'];
+    if (clientId is! int || investmentTransactionsBusy) return;
+    setState(() {
+      investmentTransactionsBusy = true;
+      investmentTransactionsError = null;
+    });
+    try {
+      final transactions = await _loadInvestmentTransactions(clientId);
+      if (!mounted) return;
+      setState(() {
+        investmentTransactions = transactions;
+        investmentTransactionsHasMore = transactions.length == 100;
+      });
+    } on ApiException catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        investmentTransactionsError = exception.statusCode == 0 ||
+                exception.statusCode >= 500
+            ? 'Sem conexão para atualizar as operações. Tente novamente.'
+            : 'Não foi possível carregar as operações.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => investmentTransactionsError =
+          'Não foi possível carregar as operações. Tente novamente.');
+    } finally {
+      if (mounted) setState(() => investmentTransactionsBusy = false);
+    }
+  }
+
+  Future<void> loadMoreInvestmentTransactions() async {
+    final clientId = user?['id'];
+    if (clientId is! int || investmentTransactionsBusy ||
+        !investmentTransactionsHasMore) return;
+    setState(() {
+      investmentTransactionsBusy = true;
+      investmentTransactionsError = null;
+    });
+    try {
+      final transactions = await _loadInvestmentTransactions(
+          clientId, offset: investmentTransactions.length);
+      if (!mounted) return;
+      setState(() {
+        investmentTransactions = [...investmentTransactions, ...transactions];
+        investmentTransactionsHasMore = transactions.length == 100;
+      });
+    } on ApiException catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        investmentTransactionsError = exception.statusCode == 0 ||
+                exception.statusCode >= 500
+            ? 'Sem conexão para carregar mais operações. Tente novamente.'
+            : 'Não foi possível carregar mais operações.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => investmentTransactionsError =
+          'Não foi possível carregar mais operações. Tente novamente.');
+    } finally {
+      if (mounted) setState(() => investmentTransactionsBusy = false);
+    }
+  }
+
+  Future<void> clearInvestmentTransactionFilters() async {
+    setState(() {
+      investmentTransactionPeriod = 'all';
+      investmentTransactionType = 'all';
+      investmentTransactionSymbolController.clear();
+      investmentTransactionsHasMore = false;
+    });
+    await refreshInvestmentTransactions();
+  }
+
   // Busca o usuário e os módulos independentes em paralelo para reduzir a espera.
   Future<void> load() async {
     if (loading) return;
@@ -711,7 +821,7 @@ class _HomeScreenState extends State<HomeScreen> {
         widget.api.actionPlan(id),
         _loadNotifications(),
         _loadNotificationPreferences(),
-        widget.api.investmentTransactions(id),
+        _loadInvestmentTransactions(id),
       ]);
       if (!mounted) return;
       setState(() {
@@ -730,6 +840,7 @@ class _HomeScreenState extends State<HomeScreen> {
         notifications = results[10] as List<dynamic>;
         notificationPreferences = results[11] as Map<String, dynamic>;
         investmentTransactions = results[12] as List<dynamic>;
+        investmentTransactionsHasMore = investmentTransactions.length == 100;
       });
       final alerts = await _loadMarketAlerts();
       if (mounted) setState(() => marketAlerts = alerts);
@@ -2655,6 +2766,309 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _investmentTransactionsHistory() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 24),
+        const Text('Histórico de operações',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: investmentTransactionPeriod,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Período',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('Todo o histórico')),
+                  DropdownMenuItem(value: '30d', child: Text('Últimos 30 dias')),
+                  DropdownMenuItem(value: '90d', child: Text('Últimos 90 dias')),
+                  DropdownMenuItem(value: 'ytd', child: Text('Este ano')),
+                ],
+                onChanged: investmentTransactionsBusy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() => investmentTransactionPeriod = value);
+                        }
+                      },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: investmentTransactionType,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Tipo',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('Todas')),
+                  DropdownMenuItem(value: 'buy', child: Text('Compras')),
+                  DropdownMenuItem(value: 'sell', child: Text('Vendas')),
+                ],
+                onChanged: investmentTransactionsBusy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() => investmentTransactionType = value);
+                        }
+                      },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: investmentTransactionSymbolController,
+          enabled: !investmentTransactionsBusy,
+          textCapitalization: TextCapitalization.characters,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => refreshInvestmentTransactions(),
+          decoration: const InputDecoration(
+            labelText: 'Ativo',
+            hintText: 'Ex.: PETR4 ou AAPL',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : refreshInvestmentTransactions,
+              icon: const Icon(Icons.filter_alt_outlined),
+              label: const Text('Aplicar filtros'),
+            ),
+            TextButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : clearInvestmentTransactionFilters,
+              icon: const Icon(Icons.clear),
+              label: const Text('Limpar'),
+            ),
+          ],
+        ),
+        if (investmentTransactionsBusy)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: LinearProgressIndicator(),
+          ),
+        if (investmentTransactionsError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(investmentTransactionsError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12, bottom: 4),
+          child: Text('${investmentTransactions.length} operação(ões)'),
+        ),
+        if (investmentTransactions.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Nenhuma operação corresponde aos filtros.'),
+          )
+        else
+          ...investmentTransactions.map((raw) {
+            final operation = Map<String, dynamic>.from(raw as Map);
+            final isBuy = operation['operation_type'] == 'buy';
+            final isVoided = operation['voided_at'] != null;
+            final currency = operation['currency'];
+            final realized = isVoided ? null : operation['realized_pnl'];
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              onTap: () => showInvestmentTransactionDetails(operation),
+              leading: Icon(
+                isBuy ? Icons.south_west : Icons.north_east,
+                color: isVoided
+                    ? Colors.grey
+                    : isBuy
+                        ? Colors.blue
+                        : Colors.deepOrange,
+              ),
+              title: Text(
+                  '${isBuy ? 'Compra' : 'Venda'}${isVoided ? ' anulada' : ''} · ${operation['symbol']} · ${dateLabel(operation['operation_date'])}'),
+              subtitle: Text(
+                isVoided
+                    ? 'Toque para ver os detalhes da anulação.'
+                    : '${formatInvestmentQuantity(operation['quantity'])} cotas × ${investmentMoney(operation['unit_price'], currency)} · taxas ${investmentMoney(operation['fees'], currency)}'
+                        '${realized == null ? '' : '\nResultado realizado: ${investmentMoney(realized, currency)}'}',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isVoided
+                        ? 'Anulada'
+                        : investmentMoney(operation['net_value'], currency),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.chevron_right, size: 18),
+                ],
+              ),
+            );
+          }),
+        if (investmentTransactionsHasMore)
+          Align(
+            alignment: Alignment.center,
+            child: TextButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : loadMoreInvestmentTransactions,
+              icon: const Icon(Icons.expand_more),
+              label: const Text('Carregar mais operações'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _investmentTransactionDetailRow(String label, String value,
+      {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, color: valueColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> showInvestmentTransactionDetails(
+      Map<String, dynamic> operation) async {
+    final isBuy = operation['operation_type'] == 'buy';
+    final isVoided = operation['voided_at'] != null;
+    final currency = operation['currency'];
+    final realized = double.tryParse(operation['realized_pnl']?.toString() ?? '');
+    final name = operation['name']?.toString().trim();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                '${isBuy ? 'Compra' : 'Venda'} · ${operation['symbol']}',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              if (name != null && name.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(name,
+                      style: Theme.of(sheetContext).textTheme.bodyMedium),
+                ),
+              if (isVoided)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Chip(
+                    avatar: Icon(Icons.cancel_outlined, size: 18),
+                    label: Text('Operação anulada'),
+                  ),
+                ),
+              const Divider(height: 24),
+              _investmentTransactionDetailRow(
+                  'Data', dateLabel(operation['operation_date'])),
+              _investmentTransactionDetailRow(
+                  'Mercado', operation['market'] == 'global' ? 'Global' : 'Brasil'),
+              _investmentTransactionDetailRow(
+                  'Quantidade', '${formatInvestmentQuantity(operation['quantity'])} cotas'),
+              _investmentTransactionDetailRow(
+                  'Preço por cota', investmentMoney(operation['unit_price'], currency)),
+              _investmentTransactionDetailRow(
+                  'Valor bruto', investmentMoney(operation['gross_value'], currency)),
+              _investmentTransactionDetailRow(
+                  'Taxas', investmentMoney(operation['fees'], currency)),
+              _investmentTransactionDetailRow(
+                  'Valor líquido', investmentMoney(operation['net_value'], currency)),
+              const Divider(height: 20),
+              Text('Impacto na carteira',
+                  style: Theme.of(sheetContext)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              _investmentTransactionDetailRow(
+                  'Cotas antes', formatInvestmentQuantity(operation['quantity_before'])),
+              _investmentTransactionDetailRow(
+                  'Cotas depois', formatInvestmentQuantity(operation['quantity_after'])),
+              _investmentTransactionDetailRow(
+                  'Preço médio antes',
+                  operation['average_price_before'] == null
+                      ? '—'
+                      : investmentMoney(operation['average_price_before'], currency)),
+              _investmentTransactionDetailRow(
+                  'Preço médio depois',
+                  operation['average_price_after'] == null
+                      ? '—'
+                      : investmentMoney(operation['average_price_after'], currency)),
+              if (!isBuy && !isVoided && operation['realized_pnl'] != null)
+                _investmentTransactionDetailRow(
+                  'Resultado realizado',
+                  '${realized != null && realized >= 0 ? '+' : ''}${investmentMoney(operation['realized_pnl'], currency)}',
+                  valueColor: realized == null
+                      ? null
+                      : realized >= 0
+                          ? Colors.green
+                          : Colors.red,
+                ),
+              if (operation['institution']?.toString().trim().isNotEmpty == true)
+                _investmentTransactionDetailRow(
+                    'Instituição', operation['institution'].toString()),
+              if (operation['notes']?.toString().trim().isNotEmpty == true)
+                _investmentTransactionDetailRow(
+                    'Observações', operation['notes'].toString()),
+              if (isVoided && operation['void_reason'] != null)
+                _investmentTransactionDetailRow(
+                    'Motivo da anulação', operation['void_reason'].toString()),
+              if (isVoided && operation['voided_at'] != null)
+                _investmentTransactionDetailRow(
+                    'Anulada em', dateTimeLabel(operation['voided_at'])),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Exibe a carteira consolidada por posição, moeda e resultado.
   Widget _investmentPortfolioView() {
     final portfolio = investmentPortfolio ?? <String, dynamic>{};
@@ -2771,39 +3185,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       : investmentMoney(
                           item['current_value'], item['currency'])))),
             ],
-            if (investmentTransactions.isNotEmpty) ...[
-              const Divider(height: 24),
-              const Text('Histórico de operações',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-              ...investmentTransactions.map((raw) {
-                final operation = Map<String, dynamic>.from(raw as Map);
-                final isBuy = operation['operation_type'] == 'buy';
-                final isVoided = operation['voided_at'] != null;
-                final currency = operation['currency'];
-                final date = dateLabel(operation['operation_date']);
-                final realized = isVoided ? null : operation['realized_pnl'];
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(isBuy ? Icons.south_west : Icons.north_east,
-                      color: isBuy ? Colors.blue : Colors.deepOrange),
-                  title: Text('${isBuy ? 'Compra' : 'Venda'}${isVoided ? ' anulada' : ''} · ${operation['symbol']} · $date'),
-                  subtitle: Text(
-                    isVoided
-                        ? 'Motivo: ${operation['void_reason'] ?? 'não informado'}'
-                        : '${formatInvestmentQuantity(operation['quantity'])} cotas × ${investmentMoney(operation['unit_price'], currency)} · taxas ${investmentMoney(operation['fees'], currency)}'
-                            '${realized == null ? '' : '\nResultado realizado: ${investmentMoney(realized, currency)}'}',
-                  ),
-                  trailing: Text(
-                    isVoided
-                        ? 'Anulada'
-                        : hideValues
-                        ? '••••••'
-                        : investmentMoney(operation['net_value'], currency),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                );
-              }),
-            ],
+            _investmentTransactionsHistory(),
             if (positions.isEmpty)
               const Padding(
                   padding: EdgeInsets.only(top: 10),
