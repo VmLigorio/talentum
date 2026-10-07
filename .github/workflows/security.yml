@@ -3,6 +3,12 @@ name: Talentum security checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: Endereço da API incluído no APK de teste
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -45,7 +51,9 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
       - name: Build Android debug APK
-        run: flutter build apk --debug --dart-define=API_URL=http://192.168.10.16:8001
+        env:
+          TALENTUM_API_URL: ${{ inputs.api_url || vars.TALENTUM_API_URL || 'http://192.168.10.16:8001' }}
+        run: flutter build apk --debug --dart-define="API_URL=${TALENTUM_API_URL}"
       - name: Save Android debug APK
         uses: actions/upload-artifact@v4
         with:

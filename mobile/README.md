@@ -53,6 +53,15 @@ O endereço da API pode ser informado com `--dart-define=API_URL=...`. Para uma 
 use HTTPS e um endereço acessível pelo dispositivo; o endereço `127.0.0.1` só funciona quando
 a API está na própria máquina ou quando o emulador possui esse encaminhamento configurado.
 
+### Gerar APK de teste pelo GitHub Actions
+
+Na execução manual do workflow **Talentum security checks**, informe o campo `api_url`, como
+`http://192.168.10.16:8001`. Para usar um endereço fixo nas compilações automáticas, configure
+a variável de repositório `TALENTUM_API_URL` em **Settings → Secrets and variables → Actions → Variables**.
+Se os dois estiverem vazios, o workflow mantém o endereço local atualmente usado nos testes.
+O APK aparece no artefato `talentum-android-debug` por sete dias. A execução manual fica disponível
+depois que o workflow estiver presente na branch padrão do repositório.
+
 ## Checklist de entrega
 
 Com o Flutter instalado e habilitado no ambiente, execute na pasta `mobile`:
