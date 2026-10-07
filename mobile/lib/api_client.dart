@@ -200,8 +200,9 @@ class ApiClient {
   // A renovação usa o refresh token atual e substitui os dois tokens locais.
   Future<void> _performRefresh() async {
     final currentRefreshToken = refreshToken;
-    if (currentRefreshToken == null)
+    if (currentRefreshToken == null) {
       throw ApiException('Sessão expirada.', 401);
+    }
     final data = await _request(
       '/auth/refresh',
       method: 'POST',
@@ -224,6 +225,14 @@ class ApiClient {
   Future<Map<String, dynamic>> investmentPortfolio(int clientId) async =>
       Map<String, dynamic>.from(
           await _request('/clients/$clientId/investment-portfolio') as Map);
+
+  Future<Map<String, dynamic>> investmentMonthlyPerformance(int clientId) async =>
+      Map<String, dynamic>.from(await _request(
+          '/clients/$clientId/investment-monthly-performance') as Map);
+
+  Future<List<dynamic>> investmentTransactions(int clientId) async =>
+      List<dynamic>.from(await _request(
+          '/clients/$clientId/investment-transactions?limit=100') as List);
 
   Future<List<dynamic>> patrimony(int clientId) async => List<dynamic>.from(
       await _request('/clients/$clientId/patrimony') as List);
@@ -424,6 +433,52 @@ class ApiClient {
       throw ApiException('A API não respondeu corretamente.', 0);
     } on TimeoutException {
       throw ApiException('O download demorou demais para responder.', 0);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<List<int>> downloadInvestmentReport(int clientId,
+      {bool retryOnUnauthorized = true}) async {
+    final client = HttpClient();
+    try {
+      client.connectionTimeout = const Duration(seconds: 12);
+      final request = await client.getUrl(
+          Uri.parse('$baseUrl/clients/$clientId/investment-report.pdf'));
+      if (accessToken != null) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      }
+      final response = await request.close().timeout(const Duration(seconds: 60));
+      final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
+        all.addAll(chunk);
+        return all;
+      });
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 &&
+            retryOnUnauthorized &&
+            refreshToken != null) {
+          try {
+            await _refresh();
+            return await downloadInvestmentReport(clientId,
+                retryOnUnauthorized: false);
+          } catch (_) {
+            await clearSession();
+          }
+        }
+        final data = _decodeJson(utf8.decode(bytes));
+        final detail = data is Map && data['detail'] is String
+            ? data['detail'] as String
+            : 'Não foi possível emitir o relatório da carteira.';
+        throw ApiException(detail, response.statusCode);
+      }
+      return bytes;
+    } on SocketException {
+      throw ApiException('Não foi possível conectar à API.', 0);
+    } on HttpException {
+      throw ApiException('A API não respondeu corretamente.', 0);
+    } on TimeoutException {
+      throw ApiException('A emissão demorou demais para responder.', 0);
     } finally {
       client.close(force: true);
     }

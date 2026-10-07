@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.db.database import get_db
-from app.models import AuditLog, InvestmentPosition, User
+from app.models import AuditLog, InvestmentPosition, InvestmentTransaction, User
 from app.schemas.investment_position import (
     InvestmentAllocation,
     InvestmentCurrencyTotal,
@@ -190,9 +190,19 @@ def create_investment_position(
 ) -> InvestmentPositionResponse:
     _find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
+    symbol = payload.symbol.strip().upper()
+    duplicate = db.scalar(
+        select(InvestmentPosition.id).where(
+            InvestmentPosition.client_id == client_id,
+            InvestmentPosition.market == payload.market,
+            InvestmentPosition.symbol == symbol,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Este ativo já tem uma posição cadastrada. Registre uma compra ou venda no histórico de operações.")
     item = InvestmentPosition(
         client_id=client_id,
-        symbol=payload.symbol.strip().upper(),
+        symbol=symbol,
         name=payload.name.strip() if payload.name and payload.name.strip() else None,
         market=payload.market,
         quantity=payload.quantity,
@@ -227,8 +237,29 @@ def update_investment_position(
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
     updates = payload.model_dump(exclude_unset=True)
+    has_transactions = db.scalar(
+        select(InvestmentTransaction.id)
+        .where(InvestmentTransaction.position_id == item.id)
+        .limit(1)
+    ) is not None
+    if has_transactions and {"symbol", "market", "quantity", "average_price"}.intersection(updates):
+        raise HTTPException(
+            status_code=409,
+            detail="Esta posição já tem operações registradas. Altere o saldo registrando uma compra ou venda.",
+        )
     if "symbol" in updates and isinstance(updates["symbol"], str):
         updates["symbol"] = updates["symbol"].strip().upper()
+    if "symbol" in updates or "market" in updates:
+        duplicate = db.scalar(
+            select(InvestmentPosition.id).where(
+                InvestmentPosition.client_id == client_id,
+                InvestmentPosition.id != item.id,
+                InvestmentPosition.market == updates.get("market", item.market),
+                InvestmentPosition.symbol == updates.get("symbol", item.symbol),
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="Este ativo já tem outra posição cadastrada.")
     for field, value in updates.items():
         setattr(item, field, value.strip() if isinstance(value, str) and value.strip() else (None if isinstance(value, str) else value))
     _audit(db, current_user, client_id, "update", item.id)
@@ -254,6 +285,16 @@ def delete_investment_position(
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
+    has_transactions = db.scalar(
+        select(InvestmentTransaction.id)
+        .where(InvestmentTransaction.position_id == item.id)
+        .limit(1)
+    ) is not None
+    if has_transactions:
+        raise HTTPException(
+            status_code=409,
+            detail="Esta posição tem operações no histórico. Registre uma venda para encerrar o saldo.",
+        )
     _audit(db, current_user, client_id, "delete", item.id)
     db.delete(item)
     db.commit()

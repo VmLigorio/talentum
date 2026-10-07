@@ -28,6 +28,9 @@ from app.api.market_watchlist import router as market_watchlist_router
 from app.api.investment_positions import router as investment_positions_router
 from app.api.investment_analytics import router as investment_analytics_router
 from app.api.portfolio_snapshots import router as portfolio_snapshots_router
+from app.api.investment_monthly_performance import router as investment_monthly_performance_router
+from app.api.investment_report import router as investment_report_router
+from app.api.investment_transactions import router as investment_transactions_router
 from app.api.suitability import router as suitability_router
 from app.core.config import get_cors_origins, get_settings, get_trusted_hosts
 from app.db.database import SessionLocal, get_db
@@ -274,6 +277,9 @@ app.include_router(market_watchlist_router)
 app.include_router(investment_positions_router)
 app.include_router(investment_analytics_router)
 app.include_router(portfolio_snapshots_router)
+app.include_router(investment_monthly_performance_router)
+app.include_router(investment_report_router)
+app.include_router(investment_transactions_router)
 app.include_router(suitability_router)
 
 

@@ -3,7 +3,11 @@
 # Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from app.models import MarketAlert
+from app.schemas.market_alert import MarketAlertCreate, MarketAlertUpdate
 from app.services.market_alerts import _price_reached
 
 
@@ -21,3 +25,21 @@ def test_market_alert_reaches_upper_target() -> None:
     assert _price_reached(alert, 180.00) is True
     assert _price_reached(alert, 181.20) is True
     assert _price_reached(alert, 179.99) is False
+
+
+def test_market_alert_inputs_accept_two_decimal_places() -> None:
+    create = MarketAlertCreate(
+        symbol="PETR4", market="br", target_price="32.50"
+    )
+    update = MarketAlertUpdate(target_price="32.50")
+
+    assert create.target_price == Decimal("32.50")
+    assert update.target_price == Decimal("32.50")
+
+
+def test_market_alert_inputs_reject_more_than_two_decimal_places() -> None:
+    with pytest.raises(ValidationError):
+        MarketAlertCreate(symbol="PETR4", market="br", target_price="32.501")
+
+    with pytest.raises(ValidationError):
+        MarketAlertUpdate(target_price="32.501")

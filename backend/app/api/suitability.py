@@ -22,6 +22,7 @@ from app.models import (
 from app.schemas.suitability import (
     SuitabilityAssessmentCreate,
     SuitabilityAssessmentResponse,
+    SuitabilityAdvisorProposalUpdate,
     SuitabilityClientResponseUpdate,
     SuitabilityQuestionnaireResponse,
     SuitabilityReviewUpdate,
@@ -289,6 +290,10 @@ def create_my_suitability(
         expires_at=datetime.now(timezone.utc) + timedelta(days=365),
     )
     db.add(assessment)
+    # Keep the latest questionnaire result visible in the Advisor's financial profile.
+    financial_profile = db.get(FinancialProfile, current_user.id)
+    if financial_profile is not None:
+        financial_profile.risk_profile = risk_profile
     db.flush()
     db.add(
         AuditLog(
@@ -333,6 +338,13 @@ def respond_to_my_suitability(
             status_code=status.HTTP_409_CONFLICT,
             detail="A carteira precisa ser aprovada pelo Advisor antes da resposta do cliente",
         )
+    if payload.response == "accepted" and not assessment.recommendation.get(
+        "advisor_proposal_published_at"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="O Advisor ainda não publicou uma sugestão personalizada para esta carteira",
+        )
     if assessment.client_response != "pending":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -369,6 +381,111 @@ def get_client_suitability(
     return assessment_response(assessment) if assessment else None
 
 
+@router.put(
+    "/{client_id}/suitability/{assessment_id}/proposal",
+    response_model=SuitabilityAssessmentResponse,
+)
+def publish_client_suitability_proposal(
+    client_id: int,
+    assessment_id: int,
+    payload: SuitabilityAdvisorProposalUpdate,
+    current_user: User = Depends(require_roles("admin", "advisor")),
+    db: Session = Depends(get_db),
+) -> SuitabilityAssessmentResponse:
+    find_client(client_id, db)
+    require_client_manager(client_id, current_user, db)
+    assessment = db.scalar(
+        select(SuitabilityAssessment).where(
+            SuitabilityAssessment.id == assessment_id,
+            SuitabilityAssessment.client_id == client_id,
+        )
+    )
+    if assessment is None:
+        raise HTTPException(status_code=404, detail="Avaliação não encontrada")
+    if assessment.status in {"rejected", "superseded"} or assessment.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Esta avaliação não está mais disponível para publicação",
+        )
+    if assessment.client_response == "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="O cliente já aceitou esta sugestão",
+        )
+
+    recommendation = assessment.recommendation or {}
+    current_allocations = recommendation.get("allocations", [])
+    valid_classes = {item.get("asset_class") for item in current_allocations}
+    proposal_classes = [item.asset_class for item in payload.allocations]
+    if len(proposal_classes) != len(set(proposal_classes)) or set(proposal_classes) != valid_classes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Inclua cada categoria da carteira uma única vez",
+        )
+
+    assets_by_class = {item.asset_class: item.assets for item in payload.allocations}
+    all_assets = [asset for assets in assets_by_class.values() for asset in assets]
+    if not all_assets:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Adicione ao menos um ativo antes de publicar a sugestão",
+        )
+    for assets in assets_by_class.values():
+        keys = [(asset.market, asset.symbol.casefold()) for asset in assets]
+        if len(keys) != len(set(keys)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Não repita o mesmo ativo na mesma categoria",
+            )
+
+    now = datetime.now(timezone.utc)
+    updated_allocations = []
+    for allocation in current_allocations:
+        updated_allocations.append(
+            {
+                **allocation,
+                "advisor_assets": [
+                    asset.model_dump(exclude_none=True)
+                    for asset in assets_by_class[allocation["asset_class"]]
+                ],
+            }
+        )
+    assessment.recommendation = {
+        **recommendation,
+        "allocations": updated_allocations,
+        "advisor_proposal_published_at": now.isoformat(),
+        "advisor_proposal_by": current_user.name,
+    }
+    assessment.status = "approved"
+    assessment.reviewed_at = now
+    assessment.reviewed_by_user_id = current_user.id
+    if assessment.client_response != "pending":
+        assessment.client_response = "pending"
+        assessment.client_response_note = None
+        assessment.client_response_at = None
+    db.add(
+        AuditLog(
+            actor_user_id=current_user.id,
+            client_user_id=client_id,
+            action="publish",
+            resource="suitability_advisor_proposal",
+            resource_id=str(assessment.id),
+            details={
+                "allocations": [
+                    {
+                        "asset_class": asset_class,
+                        "symbols": [asset.symbol for asset in assets],
+                    }
+                    for asset_class, assets in assets_by_class.items()
+                ]
+            },
+        )
+    )
+    db.commit()
+    db.refresh(assessment)
+    return assessment_response(assessment)
+
+
 @router.post(
     "/{client_id}/suitability/{assessment_id}/review",
     response_model=SuitabilityAssessmentResponse,
@@ -390,6 +507,11 @@ def review_client_suitability(
     )
     if assessment is None:
         raise HTTPException(status_code=404, detail="Avaliação não encontrada")
+    if assessment.client_response == "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A avaliação já foi aceita pelo cliente e não pode ser alterada",
+        )
     assessment.status = "approved" if payload.approved else "rejected"
     assessment.reviewed_at = datetime.now(timezone.utc)
     assessment.reviewed_by_user_id = current_user.id

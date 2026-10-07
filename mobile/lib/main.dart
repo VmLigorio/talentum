@@ -1,22 +1,87 @@
 // Talentum — mobile/lib/main.dart
 // Responsabilidade: Implementa a interface Flutter, os fluxos de autenticação e as funcionalidades do cliente.
 // Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File, Platform;
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 
+// Aplica máscara pt-BR e limita valores a duas casas decimais.
+class TwoDecimalMoneyInputFormatter extends TextInputFormatter {
+  const TwoDecimalMoneyInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final input = newValue.text;
+    if (!RegExp(r'^-?[0-9.,]*$').hasMatch(input)) return oldValue;
+
+    final caret = newValue.selection.baseOffset.clamp(0, input.length);
+    final digitsBeforeCaret =
+        RegExp(r'\d').allMatches(input.substring(0, caret)).length;
+    final hasComma = input.contains(',');
+    final periodsAreGrouping =
+        !hasComma && RegExp(r'^-?\d{1,3}(\.\d{3})+$').hasMatch(input);
+    final separatorIndex = hasComma
+        ? input.indexOf(',')
+        : periodsAreGrouping
+            ? -1
+            : input.lastIndexOf('.');
+    final caretWasAfterDecimal = separatorIndex >= 0 && caret > separatorIndex;
+    final integerSource =
+        separatorIndex >= 0 ? input.substring(0, separatorIndex) : input;
+    final fractionSource = separatorIndex >= 0
+        ? input.substring(separatorIndex + 1).replaceAll(RegExp(r'\D'), '')
+        : '';
+    if (fractionSource.length > 2) return oldValue;
+
+    final negative = integerSource.startsWith('-');
+    final digits = integerSource.replaceAll(RegExp(r'\D'), '');
+    final integer = digits.isEmpty
+        ? (negative ? '-0' : '0')
+        : '${negative ? '-' : ''}${digits.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => '.')}';
+    final formatted =
+        '$integer${separatorIndex >= 0 ? ',$fractionSource' : ''}';
+    var mappedCaret = 0;
+    var seenDigits = 0;
+    for (var index = 0; index < formatted.length; index++) {
+      if (RegExp(r'\d').hasMatch(formatted[index])) seenDigits++;
+      if (seenDigits >= digitsBeforeCaret && digitsBeforeCaret > 0) {
+        mappedCaret = index + 1;
+        break;
+      }
+      mappedCaret = index + 1;
+    }
+    final formattedSeparator = formatted.indexOf(',');
+    if (caretWasAfterDecimal &&
+        formattedSeparator >= 0 &&
+        mappedCaret <= formattedSeparator) {
+      mappedCaret = formattedSeparator + 1;
+    }
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(
+          offset: mappedCaret.clamp(0, formatted.length)),
+    );
+  }
+}
+
 // Converte entradas numéricas digitadas no padrão brasileiro para double.
 double? parseBrazilianNumber(String value) {
   final sanitized = value.trim().replaceAll(RegExp(r'[^0-9,.-]'), '');
   if (sanitized.isEmpty) return null;
-  final normalized = sanitized.contains(',')
+  final groupedInteger = RegExp(r'^-?\d{1,3}(\.\d{3})+$').hasMatch(sanitized);
+  final normalized = sanitized.contains(',') || groupedInteger
       ? sanitized.replaceAll('.', '').replaceAll(',', '.')
       : sanitized;
   return double.tryParse(normalized);
@@ -40,6 +105,26 @@ String formatBrazilianNumber(dynamic value, {int fractionDigits = 2}) {
   );
   final sign = parsed < 0 ? '-' : '';
   return '$sign$groupedInteger${fractionDigits > 0 ? ',${parts[1]}' : ''}';
+}
+
+String formatApiDate(dynamic value) {
+  final raw = value?.toString() ?? '';
+  return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(raw)
+      ? '${raw.substring(8, 10)}/${raw.substring(5, 7)}/${raw.substring(0, 4)}'
+      : raw;
+}
+
+// Exibe cotas com até oito casas, omitindo zeros decimais à direita.
+String formatInvestmentQuantity(dynamic value) {
+  if (value == null) return '0';
+  final raw = value.toString().trim().replaceAll(',', '.');
+  final normalized = raw.toLowerCase().contains('e')
+      ? (double.tryParse(raw)?.toStringAsFixed(8) ?? raw)
+      : raw;
+  final parts = normalized.split('.');
+  if (parts.length < 2) return normalized;
+  final fraction = parts.skip(1).join().replaceAll(RegExp(r'0+$'), '');
+  return fraction.isEmpty ? parts.first : '${parts.first},$fraction';
 }
 
 const biometricEnabledKey = 'talentum_biometric_enabled';
@@ -115,6 +200,177 @@ class LoginScreen extends StatefulWidget {
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class InvestmentDonutPainter extends CustomPainter {
+  InvestmentDonutPainter({required this.values});
+
+  final List<double> values;
+  static const colors = <Color>[
+    Color(0xff5d4bc4), Color(0xff20a58a), Color(0xfff0a43a),
+    Color(0xffe45b73), Color(0xff4195d3), Color(0xff8769b4),
+    Color(0xff94b84b), Color(0xffe17c3e),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = values.fold<double>(0, (sum, value) => sum + value);
+    if (total <= 0) return;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
+    final bounds = Rect.fromCircle(center: center, radius: radius);
+    var start = -1.5707963267948966;
+    for (var index = 0; index < values.length; index++) {
+      final sweep = values[index] / total * 6.283185307179586;
+      canvas.drawArc(bounds, start, sweep, true,
+          Paint()..color = colors[index % colors.length]);
+      start += sweep;
+    }
+    canvas.drawCircle(center, radius * .59, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant InvestmentDonutPainter oldDelegate) =>
+      oldDelegate.values != values;
+}
+
+class MonthlyInvestmentLineChart extends StatelessWidget {
+  const MonthlyInvestmentLineChart({
+    super.key,
+    required this.points,
+    required this.showCdi,
+  });
+
+  final List<dynamic> points;
+  final bool showCdi;
+
+  @override
+  Widget build(BuildContext context) {
+    if (points.isEmpty) return const SizedBox.shrink();
+    final firstDate = points.first['date']?.toString() ?? '';
+    final lastDate = points.last['date']?.toString() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 170,
+            child: CustomPaint(
+              painter: MonthlyInvestmentChartPainter(
+                  points: points, showCdi: showCdi),
+              child: const SizedBox.expand(),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(firstDate.length >= 10 ? firstDate.substring(5, 10) : ''),
+              Text(lastDate.length >= 10 ? lastDate.substring(5, 10) : ''),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 16,
+            children: [
+              const _ChartLegend(color: Color(0xff5d4bc4), label: 'Carteira'),
+              if (showCdi)
+                const _ChartLegend(color: Color(0xff20a58a), label: 'CDI'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChartLegend extends StatelessWidget {
+  const _ChartLegend({required this.color, required this.label});
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 14, height: 3, color: color),
+          const SizedBox(width: 5),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      );
+}
+
+class MonthlyInvestmentChartPainter extends CustomPainter {
+  MonthlyInvestmentChartPainter({required this.points, required this.showCdi});
+
+  final List<dynamic> points;
+  final bool showCdi;
+
+  double _value(dynamic item, String key) =>
+      double.tryParse(item[key]?.toString() ?? '') ?? 0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const horizontalPadding = 10.0;
+    const verticalPadding = 12.0;
+    final values = <double>[0];
+    for (final point in points) {
+      values.add(_value(point, 'return_percent'));
+      if (showCdi && point['cdi_return_percent'] != null) {
+        values.add(_value(point, 'cdi_return_percent'));
+      }
+    }
+    var minimum = values.reduce((a, b) => a < b ? a : b);
+    var maximum = values.reduce((a, b) => a > b ? a : b);
+    if (maximum - minimum < .15) {
+      maximum += .1;
+      minimum -= .1;
+    }
+    final plotWidth = size.width - horizontalPadding * 2;
+    final plotHeight = size.height - verticalPadding * 2;
+    double x(int index) => horizontalPadding +
+        (points.length <= 1 ? 0 : index * plotWidth / (points.length - 1));
+    double y(double value) =>
+        verticalPadding + (maximum - value) * plotHeight / (maximum - minimum);
+
+    canvas.drawLine(
+      Offset(horizontalPadding, y(0)),
+      Offset(size.width - horizontalPadding, y(0)),
+      Paint()
+        ..color = const Color(0xffd9d6e2)
+        ..strokeWidth = 1,
+    );
+    void drawSeries(String key, Color color) {
+      final path = Path();
+      var started = false;
+      for (var index = 0; index < points.length; index++) {
+        final point = points[index];
+        if (point[key] == null) continue;
+        final offset = Offset(x(index), y(_value(point, key)));
+        if (!started) {
+          path.moveTo(offset.dx, offset.dy);
+          started = true;
+        } else {
+          path.lineTo(offset.dx, offset.dy);
+        }
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = color
+          ..strokeWidth = 2.5
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..style = PaintingStyle.stroke,
+      );
+    }
+
+    drawSeries('return_percent', const Color(0xff5d4bc4));
+    if (showCdi) drawSeries('cdi_return_percent', const Color(0xff20a58a));
+  }
+
+  @override
+  bool shouldRepaint(covariant MonthlyInvestmentChartPainter oldDelegate) =>
+      oldDelegate.points != points || oldDelegate.showCdi != showCdi;
 }
 
 class _LoginScreenState extends State<LoginScreen> {
@@ -206,12 +462,14 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on ApiException {
       await widget.api.clearSession();
-      if (mounted)
+      if (mounted) {
         setState(
             () => error = 'Sua sessão expirou. Entre com sua senha novamente.');
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => error = 'Não foi possível validar a biometria.');
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -333,6 +591,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? user;
   Map<String, dynamic>? dashboard;
   Map<String, dynamic>? investmentPortfolio;
+  List<dynamic> investmentTransactions = [];
+  Map<String, dynamic>? investmentMonthlyPerformance;
+  String? investmentMonthlyPerformanceError;
   List<dynamic> patrimony = [];
   List<dynamic> goals = [];
   List<dynamic> actionPlan = [];
@@ -348,9 +609,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String? error;
   bool loading = false;
   bool documentBusy = false;
+  bool investmentReportBusy = false;
   bool biometricAvailable = false;
   bool biometricEnabled = false;
   String? cachedAt;
+  Timer? monthlyPerformanceTimer;
 
   // Carrega preferências e dispara a leitura inicial dos dados protegidos.
   @override
@@ -359,6 +622,16 @@ class _HomeScreenState extends State<HomeScreen> {
     hideValues = widget.api.preferences.getBool(hideValuesKey) ?? false;
     _loadBiometricStatus();
     load();
+    monthlyPerformanceTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      final clientId = user?['id'];
+      if (clientId is int) unawaited(_loadInvestmentMonthlyPerformance(clientId));
+    });
+  }
+
+  @override
+  void dispose() {
+    monthlyPerformanceTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadBiometricStatus() async {
@@ -373,10 +646,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _toggleBiometric() async {
     if (!biometricAvailable) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content:
                 Text('Este dispositivo não possui biometria disponível.')));
+      }
       return;
     }
     if (biometricEnabled) {
@@ -399,9 +673,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const SnackBar(content: Text('Acesso biométrico ativado.')));
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Não foi possível ativar a biometria.')));
+      }
     }
   }
 
@@ -437,6 +712,7 @@ class _HomeScreenState extends State<HomeScreen> {
         widget.api.actionPlan(id),
         _loadNotifications(),
         _loadNotificationPreferences(),
+        widget.api.investmentTransactions(id),
       ]);
       if (!mounted) return;
       setState(() {
@@ -454,12 +730,14 @@ class _HomeScreenState extends State<HomeScreen> {
         actionPlan = results[9] as List<dynamic>;
         notifications = results[10] as List<dynamic>;
         notificationPreferences = results[11] as Map<String, dynamic>;
+        investmentTransactions = results[12] as List<dynamic>;
       });
       final alerts = await _loadMarketAlerts();
       if (mounted) setState(() => marketAlerts = alerts);
       final currentSuitability = await _loadSuitability();
       if (mounted) setState(() => suitability = currentSuitability);
       await _saveClientCache(currentUser, results, currentSuitability);
+      unawaited(_loadInvestmentMonthlyPerformance(id));
     } on ApiException catch (exception) {
       if (widget.api.accessToken == null) {
         await widget.api.secureStorage.delete(clientCacheKey);
@@ -539,6 +817,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadInvestmentMonthlyPerformance(int clientId) async {
+    try {
+      final result = await widget.api.investmentMonthlyPerformance(clientId);
+      if (!mounted) return;
+      setState(() {
+        investmentMonthlyPerformance = result;
+        investmentMonthlyPerformanceError = null;
+      });
+      try {
+        final raw = await widget.api.secureStorage.read(clientCacheKey);
+        if (raw != null) {
+          final cache = jsonDecode(raw) as Map<String, dynamic>;
+          cache['investment_monthly_performance'] = result;
+          await widget.api.secureStorage.write(clientCacheKey, jsonEncode(cache));
+        }
+      } catch (_) {
+        // A falha de cache não impede a atualização online da carteira.
+      }
+    } on ApiException catch (exception) {
+      if (!mounted) return;
+      setState(() => investmentMonthlyPerformanceError = exception.message);
+    }
+  }
+
   Future<void> _saveClientCache(Map<String, dynamic> currentUser,
       List<dynamic> results, Map<String, dynamic>? currentSuitability) async {
     try {
@@ -558,6 +860,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'action_plan': results[9],
             'notifications': results[10],
             'notification_preferences': results[11],
+            'investment_transactions': results[12],
             'market_alerts': marketAlerts,
             'suitability': currentSuitability,
             'cached_at': DateTime.now().toIso8601String(),
@@ -582,6 +885,13 @@ class _HomeScreenState extends State<HomeScreen> {
         dashboard = cachedDashboard;
         investmentPortfolio = Map<String, dynamic>.from(
             payload['investment_portfolio'] as Map? ?? {});
+        investmentTransactions =
+            List<dynamic>.from(payload['investment_transactions'] as List? ?? []);
+        investmentMonthlyPerformance =
+            payload['investment_monthly_performance'] == null
+                ? null
+                : Map<String, dynamic>.from(
+                    payload['investment_monthly_performance'] as Map);
         patrimony = List<dynamic>.from(payload['patrimony'] as List? ?? []);
         goals = List<dynamic>.from(payload['goals'] as List? ?? []);
         reports = List<dynamic>.from(payload['reports'] as List? ?? []);
@@ -713,20 +1023,24 @@ class _HomeScreenState extends State<HomeScreen> {
       final right = Map<String, dynamic>.from(rightValue as Map);
       final leftOverdue = isOverdueAction(left) ? 1 : 0;
       final rightOverdue = isOverdueAction(right) ? 1 : 0;
-      if (leftOverdue != rightOverdue)
+      if (leftOverdue != rightOverdue) {
         return rightOverdue.compareTo(leftOverdue);
+      }
       final leftCompleted = left['status'] == 'completed' ? 1 : 0;
       final rightCompleted = right['status'] == 'completed' ? 1 : 0;
-      if (leftCompleted != rightCompleted)
+      if (leftCompleted != rightCompleted) {
         return leftCompleted.compareTo(rightCompleted);
+      }
       final leftPriority = priorityOrder[left['priority']?.toString()] ?? 3;
       final rightPriority = priorityOrder[right['priority']?.toString()] ?? 3;
-      if (leftPriority != rightPriority)
+      if (leftPriority != rightPriority) {
         return leftPriority.compareTo(rightPriority);
+      }
       final leftDue = left['due_date']?.toString();
       final rightDue = right['due_date']?.toString();
-      if (leftDue != null && rightDue != null && leftDue != rightDue)
+      if (leftDue != null && rightDue != null && leftDue != rightDue) {
         return leftDue.compareTo(rightDue);
+      }
       if (leftDue != null && rightDue == null) return -1;
       if (leftDue == null && rightDue != null) return 1;
       return (left['title']?.toString() ?? '')
@@ -750,16 +1064,19 @@ class _HomeScreenState extends State<HomeScreen> {
       final right = Map<String, dynamic>.from(rightValue as Map);
       final leftOverdue = isOverdueGoal(left) ? 1 : 0;
       final rightOverdue = isOverdueGoal(right) ? 1 : 0;
-      if (leftOverdue != rightOverdue)
+      if (leftOverdue != rightOverdue) {
         return rightOverdue.compareTo(leftOverdue);
+      }
       final leftCompleted = left['status'] == 'completed' ? 1 : 0;
       final rightCompleted = right['status'] == 'completed' ? 1 : 0;
-      if (leftCompleted != rightCompleted)
+      if (leftCompleted != rightCompleted) {
         return leftCompleted.compareTo(rightCompleted);
+      }
       final leftDate = left['target_date']?.toString();
       final rightDate = right['target_date']?.toString();
-      if (leftDate != null && rightDate != null && leftDate != rightDate)
+      if (leftDate != null && rightDate != null && leftDate != rightDate) {
         return leftDate.compareTo(rightDate);
+      }
       if (leftDate != null && rightDate == null) return -1;
       if (leftDate == null && rightDate != null) return 1;
       return (left['title']?.toString() ?? '')
@@ -785,6 +1102,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final labels = [
       'Início',
+      'Carteira',
       'Patrimônio',
       'Metas',
       'Documentos',
@@ -851,12 +1169,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   ])),
       bottomNavigationBar: NavigationBar(
           selectedIndex: tab,
+          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
           onDestinationSelected: (value) => setState(() => tab = value),
           destinations: const [
             NavigationDestination(
                 icon: Icon(Icons.home_outlined),
                 selectedIcon: Icon(Icons.home),
                 label: 'Início'),
+            NavigationDestination(
+                icon: Icon(Icons.show_chart),
+                selectedIcon: Icon(Icons.show_chart),
+                label: 'Carteira'),
             NavigationDestination(
                 icon: Icon(Icons.pie_chart_outline),
                 selectedIcon: Icon(Icons.pie_chart),
@@ -883,11 +1206,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Seleciona o conteúdo da aba sem duplicar a estrutura do scaffold principal.
   Widget _content() {
-    if (tab == 1) return _patrimonyView();
-    if (tab == 2) return _goalsView();
-    if (tab == 3) return _documentsView();
-    if (tab == 4) return _reportsView();
-    if (tab == 5) return _profileView();
+    if (tab == 1) return _investmentPortfolioView();
+    if (tab == 2) return _patrimonyView();
+    if (tab == 3) return _goalsView();
+    if (tab == 4) return _documentsView();
+    if (tab == 5) return _reportsView();
+    if (tab == 6) return _profileView();
     final data = dashboard!;
     final categories =
         List<dynamic>.from(data['patrimony_by_category'] as List? ?? []);
@@ -1136,7 +1460,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Apresenta o estado da avaliação e os percentuais da carteira modelo.
+  // Resume a carteira sugerida à divisão e aos ativos de referência.
   Widget _suitabilityCard() {
     final assessment = suitability;
     if (assessment == null) {
@@ -1150,7 +1474,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               const Text(
-                  'Responda algumas perguntas para receber uma sugestão de alocação por objetivo e perfil de risco.'),
+                  'Responda ao questionário para ver a divisão da carteira e os ativos sugeridos.'),
               const SizedBox(height: 14),
               FilledButton.icon(
                 onPressed: openSuitabilityQuestionnaire,
@@ -1165,60 +1489,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final recommendation =
         Map<String, dynamic>.from(assessment['recommendation'] as Map? ?? {});
-    final assessmentAnswers = Map<String, dynamic>.from(
-        assessment['answers'] as Map? ?? <String, dynamic>{});
-    final financial = Map<String, dynamic>.from(
-      assessment['financial_situation'] as Map? ?? <String, dynamic>{},
-    );
-    final financialCategories = List<dynamic>.from(
-        financial['patrimony_by_category'] as List? ?? <dynamic>[]);
-    final financialGoals =
-        List<dynamic>.from(financial['active_goals'] as List? ?? <dynamic>[]);
-    final financialFlagLabels = <String, String>{
-      'monthly_surplus_not_positive':
-          'O saldo mensal cadastrado não é positivo.',
-      'active_goal_within_2_years':
-          'Existe uma meta com prazo nos próximos dois anos.',
-      'no_patrimony_items_recorded':
-          'Não havia itens de patrimônio cadastrados.',
-      'liabilities_not_recorded': 'Dívidas não estão incluídas neste resumo.',
-    };
-    final financialFlags =
-        List<dynamic>.from(financial['capacity_flags'] as List? ?? <dynamic>[]);
-    const knowledgeAnswerLabels = <String, String>{
-      'product_familiarity': 'Familiaridade com produtos',
-      'operation_products': 'Produtos já utilizados',
-      'operation_period': 'Tempo de experiência',
-      'operation_frequency': 'Frequência das operações',
-      'monthly_operation_volume': 'Volume mensal aproximado',
-      'financial_education': 'Formação ou experiência profissional',
-    };
-    const knowledgeOptionLabels = <String, String>{
-      'none': 'Nenhum / não realizou operações',
-      'fixed_income': 'Renda fixa',
-      'funds': 'Fundos de investimento',
-      'stocks_etfs': 'Ações e ETFs',
-      'fiis': 'Fundos imobiliários (FIIs)',
-      'derivatives_structured': 'Derivativos e produtos estruturados',
-      'under_1_year': 'Menos de 1 ano',
-      '1_to_3_years': 'De 1 a 3 anos',
-      'over_3_years': 'Mais de 3 anos',
-      'few_per_year': 'Algumas vezes por ano',
-      'monthly': 'Mensalmente',
-      'weekly_or_more': 'Semanalmente ou mais',
-      'under_1000': 'Até R\$ 1.000',
-      '1000_to_10000': 'De R\$ 1.000 a R\$ 10.000',
-      'over_10000': 'Acima de R\$ 10.000',
-      'prefer_not_to_say': 'Prefiro não informar',
-      'education': 'Curso ou formação relacionada',
-      'professional': 'Experiência profissional na área',
-      'both': 'Formação e experiência profissional',
-    };
     final allocations = List<dynamic>.from(
         recommendation['allocations'] as List? ?? <dynamic>[]);
-    final recommendedActions = List<dynamic>.from(
-        recommendation['recommended_actions'] as List? ?? <dynamic>[]);
-    final status = assessment['status']?.toString() ?? 'pending_review';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1229,7 +1501,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(
-                  child: Text('Sua carteira sugerida',
+                  child: Text('Carteira sugerida',
                       style: Theme.of(context).textTheme.titleMedium),
                 ),
                 IconButton(
@@ -1239,134 +1511,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            Text(
-              '${assessment['objective_label']} · perfil ${assessment['risk_profile_label']}',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text('Status: ${suitabilityStatusLabel(status)}'),
-            const SizedBox(height: 8),
-            Text(assessment['risk_profile_description']?.toString() ?? ''),
-            if (financial['data_version'] != null) ...[
-              const SizedBox(height: 12),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Situação financeira usada nesta avaliação',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 6),
-                      Text(
-                          'Renda mensal: ${privateMoney(financial['monthly_income'] ?? 0)}'),
-                      Text(
-                          'Despesas mensais: ${privateMoney(financial['monthly_expenses'] ?? 0)}'),
-                      Text(
-                          'Saldo mensal: ${privateMoney(financial['monthly_surplus'] ?? 0)}'),
-                      Text(
-                          'Patrimônio cadastrado, sem dívidas: ${privateMoney(financial['patrimony_total'] ?? 0)}'),
-                      if (financialCategories.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        ...financialCategories.map((entry) {
-                          final category =
-                              Map<String, dynamic>.from(entry as Map);
-                          return Text(
-                              '${category['category']}: ${privateMoney(category['value'] ?? 0)}');
-                        }),
-                      ],
-                      if (financialGoals.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                            'Metas ativas: ${financialGoals.map((entry) => Map<String, dynamic>.from(entry as Map)['title']).join(', ')}'),
-                      ],
-                      if (financialFlags.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        const Text('Pontos considerados na revisão do Advisor:',
-                            style: TextStyle(fontWeight: FontWeight.w700)),
-                        ...financialFlags.map((flag) => Text(
-                            '• ${financialFlagLabels[flag.toString()] ?? flag}')),
-                      ],
-                    ],
-                  ),
+            if (recommendation['advisor_proposal_published_at'] != null)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Sugestão personalizada do Advisor',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
-            ] else ...[
-              const SizedBox(height: 8),
-              const Text(
-                  'Esta avaliação anterior não contém um registro financeiro confirmado.',
-                  style: TextStyle(fontSize: 12)),
-            ],
-            if (assessmentAnswers.containsKey('product_familiarity')) ...[
-              const SizedBox(height: 8),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Conhecimento e experiência informados',
-                          style: TextStyle(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 6),
-                      ...knowledgeAnswerLabels.entries.map((entry) {
-                        final values =
-                            (assessmentAnswers[entry.key]?.toString() ?? '')
-                                .split(',')
-                                .where((value) => value.isNotEmpty)
-                                .map((value) =>
-                                    knowledgeOptionLabels[value] ?? value)
-                                .join(', ');
-                        return Text(
-                            '${entry.value}: ${values.isEmpty ? 'Não informado' : values}');
-                      }),
-                      const SizedBox(height: 6),
-                      const Text(
-                          'As respostas ajudam o Advisor a revisar os produtos; não elevam automaticamente o perfil de risco.',
-                          style: TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            if (recommendation['summary'] != null) ...[
-              const SizedBox(height: 8),
-              Text(recommendation['summary'].toString()),
-            ],
-            if (recommendedActions.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text('Próximas ações para validar a carteira',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              ...recommendedActions.map((entry) {
-                final action = Map<String, dynamic>.from(entry as Map);
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('• ${action['title']}',
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                      Text(action['detail'].toString(),
-                          style: const TextStyle(fontSize: 12)),
-                    ],
-                  ),
-                );
-              }),
-            ],
-            const Divider(height: 24),
-            const Text('Alocação de referência',
+            const Text('Divisão da carteira',
                 style: TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
+            if (allocations.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('A divisão sugerida ainda não está disponível.'),
+              ),
             ...allocations.map((item) {
               final allocation = Map<String, dynamic>.from(item as Map);
               final percentage =
-                  int.tryParse(allocation['percentage']?.toString() ?? '') ?? 0;
+                  double.tryParse(allocation['percentage']?.toString() ?? '') ??
+                      0;
               final suballocations = List<dynamic>.from(
                   allocation['suballocations'] as List? ?? <dynamic>[]);
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
+                padding: const EdgeInsets.only(top: 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -1374,159 +1542,80 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(child: Text(allocation['label'].toString())),
-                        Text('$percentage%',
+                        Text('${percentage.toStringAsFixed(0)}%',
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700)),
                       ],
                     ),
                     const SizedBox(height: 4),
                     LinearProgressIndicator(value: percentage / 100),
-                    if (suballocations.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      ...suballocations.map((segment) {
-                        final details =
-                            Map<String, dynamic>.from(segment as Map);
-                        final examples = List<dynamic>.from(
-                            details['examples'] as List? ?? <dynamic>[]);
-                        return Padding(
-                          padding: const EdgeInsets.only(left: 10, top: 5),
-                          child: Text(
-                            '• ${details['label']} — ${details['percentage']}% da carteira${examples.isEmpty ? '' : '\n  Exemplos para análise: ${examples.join(', ')}'}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        );
-                      }),
-                    ],
+                    ...suballocations.map((segment) {
+                      final details = Map<String, dynamic>.from(segment as Map);
+                      final examples = List<dynamic>.from(
+                          details['examples'] as List? ?? <dynamic>[]);
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 10, top: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                '${details['label']} — ${details['percentage']}%'),
+                            if (examples.isNotEmpty)
+                              Text('Ativos sugeridos: ${examples.join(', ')}',
+                                  style: const TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      );
+                    }),
+                    ...List<dynamic>.from(
+                            allocation['advisor_assets'] as List? ?? <dynamic>[])
+                        .map((item) {
+                      final asset = Map<String, dynamic>.from(item as Map);
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 10, top: 8),
+                        child: Text(
+                          'Selecionado pelo Advisor: ${asset['symbol']} — ${asset['name']}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               );
             }),
-            const SizedBox(height: 8),
-            const Text(
-              'Modelo educativo. Os ativos citados são exemplos para análise. A aprovação do Advisor não executa operações.',
-              style: TextStyle(fontSize: 12),
-            ),
-            if (status == 'approved') ...[
-              const SizedBox(height: 10),
-              Text(
-                  'Sua resposta: ${suitabilityClientResponseLabel(assessment['client_response'])}'),
-              if ((assessment['client_response_note']?.toString() ?? '')
-                  .isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child:
-                      Text('Observação: ${assessment['client_response_note']}'),
-                ),
-              if ((assessment['client_response']?.toString() ?? 'pending') ==
-                  'pending') ...[
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: () => respondToSuitability('accepted'),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Aceitar carteira-modelo'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: () => respondToSuitability('adjustment_requested'),
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Pedir ajustes'),
-                ),
-                TextButton.icon(
-                  onPressed: () => respondToSuitability('declined'),
-                  icon: const Icon(Icons.close),
-                  label: const Text('Recusar proposta'),
-                ),
-              ],
+            if (recommendation['advisor_proposal_published_at'] != null &&
+                assessment['status'] == 'approved' &&
+                assessment['client_response'] == 'pending') ...[
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () => acceptAdvisorSuitability(assessment),
+                icon: const Icon(Icons.check_circle_outline),
+                label: const Text('Aceitar sugestão do Advisor'),
+              ),
+            ] else if (assessment['client_response'] == 'accepted') ...[
+              const SizedBox(height: 12),
+              const Text('Você aceitou esta sugestão do Advisor.'),
             ],
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: openSuitabilityQuestionnaire,
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Atualizar respostas'),
-            ),
           ],
         ),
       ),
     );
   }
 
-  String suitabilityStatusLabel(dynamic value) => switch (value.toString()) {
-        'approved' => 'Aprovada pelo Advisor',
-        'rejected' => 'Aguardando nova validação',
-        'superseded' => 'Substituída por uma avaliação mais recente',
-        _ => 'Aguardando validação do Advisor',
-      };
-
-  String suitabilityClientResponseLabel(dynamic value) =>
-      switch (value?.toString()) {
-        'accepted' => 'Aceita pelo cliente',
-        'declined' => 'Recusada pelo cliente',
-        'adjustment_requested' => 'Ajustes solicitados',
-        _ => 'Aguardando sua resposta',
-      };
-
-  Future<void> respondToSuitability(String response) async {
-    final assessment = suitability;
-    if (assessment == null) return;
-    final noteController = TextEditingController();
-    final labels = {
-      'accepted': 'Aceitar esta carteira-modelo?',
-      'declined': 'Recusar esta proposta?',
-      'adjustment_requested': 'Solicitar ajustes ao Advisor?',
-    };
-    final confirmed = await showDialog<Map<String, String>?>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(labels[response] ?? 'Confirmar resposta'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Sua resposta será registrada para acompanhamento do Advisor. Nenhuma operação será realizada.',
-            ),
-            if (response != 'accepted') ...[
-              const SizedBox(height: 12),
-              TextField(
-                controller: noteController,
-                maxLength: 1000,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Observação (opcional)',
-                  hintText: 'Conte ao Advisor o que gostaria de mudar.',
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Voltar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, {
-              'note': noteController.text.trim(),
-            }),
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
-    );
-    noteController.dispose();
-    if (confirmed == null || !mounted) return;
+  Future<void> acceptAdvisorSuitability(Map<String, dynamic> assessment) async {
+    final assessmentId = assessment['id'];
+    if (assessmentId is! int) return;
     try {
       final updated = await widget.api.respondToSuitability(
-        assessmentId: assessment['id'] as int,
-        response: response,
-        note: confirmed['note'],
+        assessmentId: assessmentId,
+        response: 'accepted',
       );
       if (!mounted) return;
       setState(() => suitability = updated);
       await widget.api.secureStorage.delete(clientCacheKey);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'Resposta registrada. O Advisor poderá acompanhar seu retorno.'),
+          content: Text('Sugestão aceita e registrada na Carteira sugerida.'),
         ));
       }
     } on ApiException catch (exception) {
@@ -1534,7 +1623,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Abre o formulário completo e envia as respostas para a avaliação versionada.
   Future<void> openSuitabilityQuestionnaire() async {
     Map<String, dynamic> definition;
     try {
@@ -1866,9 +1954,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api.cancelMarketAlert(alert['id'] as int);
       await load();
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -1991,6 +2080,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     enabled: !saving,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                     decoration: const InputDecoration(
                         labelText: 'Preço-alvo', hintText: 'Ex.: 32,50')),
                 const SizedBox(height: 12),
@@ -2106,16 +2196,17 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted) openActionPlan();
         });
       } else if (kind == 'goal_overdue' || kind == 'goal_due_soon') {
-        setState(() => tab = 2);
+        setState(() => tab = 3);
       } else if (kind == 'document_uploaded') {
-        setState(() => tab = 3);
+        setState(() => tab = 4);
       } else if (kind == 'document_review_due') {
-        setState(() => tab = 3);
+        setState(() => tab = 4);
       }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -2124,9 +2215,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api.markAllNotificationsRead();
       await load();
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -2184,9 +2276,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SnackBar(content: Text('Preferências salvas.')));
                   Navigator.pop(dialogContext);
                 } on ApiException catch (exception) {
-                  if (dialogContext.mounted)
+                  if (dialogContext.mounted) {
                     ScaffoldMessenger.of(dialogContext).showSnackBar(
                         SnackBar(content: Text(exception.message)));
+                  }
                 }
               },
               child: const Text('Salvar'),
@@ -2367,6 +2460,202 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$prefix ${formatBrazilianNumber(value)}';
   }
 
+  Map<String, List<dynamic>> _positionsByCurrency(List<dynamic> positions) {
+    final grouped = <String, List<dynamic>>{};
+    for (final item in positions) {
+      final position = Map<String, dynamic>.from(item as Map);
+      final currency = position['currency']?.toString() ?? 'BRL';
+      grouped.putIfAbsent(currency, () => []).add(position);
+    }
+    return grouped;
+  }
+
+  Widget _assetAllocationDonut(String currency, List<dynamic> positions) {
+    final priced = positions.where((item) =>
+        (double.tryParse(item['allocation_percent']?.toString() ?? '') ?? 0) > 0).toList();
+    if (priced.isEmpty) return const SizedBox.shrink();
+    final values = priced
+        .map((item) => double.tryParse(
+                item['allocation_percent']?.toString() ?? '') ??
+            0)
+        .toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 148,
+            height: 148,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CustomPaint(
+                  size: const Size.square(144),
+                  painter: InvestmentDonutPainter(values: values),
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(currency,
+                        style: const TextStyle(fontWeight: FontWeight.w800)),
+                    Text('${priced.length} ativos',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              children: List.generate(priced.length, (index) {
+                final position = Map<String, dynamic>.from(priced[index] as Map);
+                final pct = values[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          color: InvestmentDonutPainter.colors[
+                              index % InvestmentDonutPainter.colors.length],
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(position['symbol']?.toString() ?? 'Ativo',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12)),
+                      ),
+                      Text('${formatBrazilianNumber(pct, fractionDigits: 1)}%',
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _monthlyInvestmentPerformance() {
+    final performance = investmentMonthlyPerformance;
+    final currencies = List<dynamic>.from(performance?['currencies'] as List? ?? []);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 24),
+        const Text('Rendimento no mês',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        if (investmentMonthlyPerformanceError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(investmentMonthlyPerformanceError!,
+                style: Theme.of(context).textTheme.bodySmall),
+          )
+        else if (performance == null)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: LinearProgressIndicator(),
+          )
+        else if (currencies.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('O histórico aparecerá após a primeira atualização da carteira.'),
+          )
+        else ...[
+          ...currencies.map((raw) {
+            final item = Map<String, dynamic>.from(raw as Map);
+            final currency = item['currency']?.toString() ?? 'BRL';
+            final hasData = item['data_available'] == true;
+            final points = List<dynamic>.from(item['points'] as List? ?? []);
+            final cdi = currency == 'BRL' ? item['cdi_percent'] : null;
+            final monthParts = (performance['month']?.toString() ?? '').split('-');
+            final month = monthParts.length == 2
+                ? '${monthParts[1]}/${monthParts[0]}'
+                : monthParts.first;
+            final start = item['coverage_start']?.toString();
+            return Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('$currency · $month',
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      if (item['source_status'] == 'partial')
+                        const Text('Dados parciais',
+                            style: TextStyle(color: Colors.deepOrange)),
+                    ],
+                  ),
+                  if (item['full_month_to_date'] == false && start != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('Histórico disponível desde ${formatApiDate(start)}.',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ),
+                  const SizedBox(height: 6),
+                  _summaryRow('Valor investido',
+                      investmentMoney(item['invested_value'], currency), Colors.blueGrey),
+                  _summaryRow('Rendimento em valor',
+                      hasData ? '${(double.tryParse(item['profit_value']?.toString() ?? '') ?? 0) >= 0 ? '+' : ''}${investmentMoney(item['profit_value'], currency)}' : '—',
+                      (double.tryParse(item['profit_value']?.toString() ?? '') ?? 0) >= 0 ? Colors.green : Colors.red),
+                  _summaryRow('Rendimento',
+                      hasData ? '${formatBrazilianNumber(item['return_percent'], fractionDigits: 2)}%' : '—', Colors.deepPurple),
+                  if (currency == 'BRL') ...[
+                    _summaryRow('CDI no mês',
+                        cdi == null ? 'Indisponível' : '${formatBrazilianNumber(cdi, fractionDigits: 2)}%', Colors.blueGrey),
+                    _summaryRow('Acima do CDI',
+                        item['excess_percentage_points'] == null ? '—' : '${(double.tryParse(item['excess_percentage_points'].toString()) ?? 0) >= 0 ? '+' : ''}${formatBrazilianNumber(item['excess_percentage_points'], fractionDigits: 2)} p.p.', Colors.teal),
+                    _summaryRow('Equivalente',
+                        item['percent_of_cdi'] == null ? '—' : '${formatBrazilianNumber(item['percent_of_cdi'], fractionDigits: 1)}% do CDI', Colors.teal),
+                  ],
+                  if (!hasData)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('Precisamos de duas atualizações completas para calcular o rendimento.',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    )
+                  else
+                    MonthlyInvestmentLineChart(
+                        points: points, showCdi: currency == 'BRL' && cdi != null),
+                ],
+              ),
+            );
+          }),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              performance['cdi_status'] == 'cached'
+                  ? 'CDI em cache: ${formatApiDate(performance['cdi_as_of'] ?? 'data indisponível')}.'
+                  : performance['cdi_as_of'] != null
+                      ? 'CDI oficial atualizado em ${formatApiDate(performance['cdi_as_of'])}.'
+                      : 'CDI oficial indisponível no momento.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          if (currencies.any((item) =>
+              (item as Map)['data_available'] == true))
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Estimativa baseada nos snapshots e no resultado das posições abertas; aportes, retiradas e vendas realizadas podem alterar o resultado mensal.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
   // Exibe a carteira consolidada por posição, moeda e resultado.
   Widget _investmentPortfolioView() {
     final portfolio = investmentPortfolio ?? <String, dynamic>{};
@@ -2406,12 +2695,39 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? 'Ver por moeda'
                     : '${pnl >= 0 ? '+' : ''}${investmentMoney(portfolio['pnl_total'], portfolio['total_currency'])}',
                 pnl >= 0 ? Colors.green : Colors.red),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: investmentReportBusy ? null : emitInvestmentReport,
+              icon: investmentReportBusy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.picture_as_pdf_outlined),
+              label: Text(investmentReportBusy
+                  ? 'Emitindo relatório...'
+                  : 'Emitir relatório detalhado (PDF)'),
+            ),
             if ((portfolio['unpriced_position_count'] as num? ?? 0) > 0)
               Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                       '${portfolio['unpriced_position_count']} posição(ões) sem cotação atual.',
                       style: Theme.of(context).textTheme.bodySmall)),
+            if (positions.isNotEmpty) ...[
+              const Divider(height: 24),
+              const Text('Distribuição por ativo',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              ..._positionsByCurrency(positions).entries.map((entry) =>
+                  _assetAllocationDonut(entry.key, entry.value)),
+              if (_positionsByCurrency(positions).length > 1)
+                const Text(
+                  'As moedas são apresentadas separadamente, sem conversão cambial.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+            ],
+            _monthlyInvestmentPerformance(),
             if (allocations.isNotEmpty) ...[
               const Divider(height: 24),
               const Text('Alocação por mercado',
@@ -2450,11 +2766,44 @@ class _HomeScreenState extends State<HomeScreen> {
                   contentPadding: EdgeInsets.zero,
                   title: Text('${item['symbol']} · ${item['name'] ?? 'Ativo'}'),
                   subtitle: Text(
-                      '${item['quantity']} unidades · médio ${investmentMoney(item['average_price'], item['currency'])}'),
+                      '${formatInvestmentQuantity(item['quantity'])} cotas · médio ${investmentMoney(item['average_price'], item['currency'])}'),
                   trailing: Text(item['current_value'] == null
                       ? 'Sem cotação'
                       : investmentMoney(
                           item['current_value'], item['currency'])))),
+            ],
+            if (investmentTransactions.isNotEmpty) ...[
+              const Divider(height: 24),
+              const Text('Histórico de operações',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              ...investmentTransactions.map((raw) {
+                final operation = Map<String, dynamic>.from(raw as Map);
+                final isBuy = operation['operation_type'] == 'buy';
+                final isVoided = operation['voided_at'] != null;
+                final currency = operation['currency'];
+                final date = dateLabel(operation['operation_date']);
+                final realized = isVoided ? null : operation['realized_pnl'];
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(isBuy ? Icons.south_west : Icons.north_east,
+                      color: isBuy ? Colors.blue : Colors.deepOrange),
+                  title: Text('${isBuy ? 'Compra' : 'Venda'}${isVoided ? ' anulada' : ''} · ${operation['symbol']} · $date'),
+                  subtitle: Text(
+                    isVoided
+                        ? 'Motivo: ${operation['void_reason'] ?? 'não informado'}'
+                        : '${formatInvestmentQuantity(operation['quantity'])} cotas × ${investmentMoney(operation['unit_price'], currency)} · taxas ${investmentMoney(operation['fees'], currency)}'
+                            '${realized == null ? '' : '\nResultado realizado: ${investmentMoney(realized, currency)}'}',
+                  ),
+                  trailing: Text(
+                    isVoided
+                        ? 'Anulada'
+                        : hideValues
+                        ? '••••••'
+                        : investmentMoney(operation['net_value'], currency),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                );
+              }),
             ],
             if (positions.isEmpty)
               const Padding(
@@ -2472,10 +2821,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (investmentPortfolio != null) ...[
-          _investmentPortfolioView(),
-          const SizedBox(height: 14)
-        ],
         if (canEdit)
           FilledButton.icon(
             onPressed: addPatrimony,
@@ -2665,13 +3010,15 @@ class _HomeScreenState extends State<HomeScreen> {
       allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg', 'txt'],
     );
     if (!mounted) return;
-    if (result == null || result.files.single.path == null || user == null)
+    if (result == null || result.files.single.path == null || user == null) {
       return;
+    }
     final file = result.files.single;
     if (file.size > 10 * 1024 * 1024) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('O arquivo excede o limite de 10 MB.')));
+      }
       return;
     }
     final path = file.path!;
@@ -2746,13 +3093,15 @@ class _HomeScreenState extends State<HomeScreen> {
           description:
               description.text.trim().isEmpty ? null : description.text.trim());
       await load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Documento enviado com sucesso.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     } finally {
       description.dispose();
       if (mounted) setState(() => documentBusy = false);
@@ -2791,6 +3140,32 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
       }
+    }
+  }
+
+  Future<void> emitInvestmentReport() async {
+    if (user == null) return;
+    setState(() => investmentReportBusy = true);
+    try {
+      final bytes = await widget.api
+          .downloadInvestmentReport(user!['id'] as int);
+      final outputPath = await FilePicker.saveFile(
+        fileName: 'relatorio-carteira-talentum.pdf',
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (outputPath != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Relatório salvo em $outputPath.')),
+        );
+      }
+    } on ApiException catch (exception) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(exception.message)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => investmentReportBusy = false);
     }
   }
 
@@ -2876,6 +3251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   controller: value,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'Valor', prefixText: 'R\$ ')),
               const SizedBox(height: 10),
@@ -2929,13 +3305,15 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api
           .updatePatrimony(user!['id'] as int, item['id'] as int, result);
       await load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Patrimônio atualizado.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -2945,9 +3323,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api.deletePatrimony(user!['id'] as int, item['id'] as int);
       await load();
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -2982,6 +3361,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   controller: value,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'Valor', prefixText: 'R\$ ')),
               const SizedBox(height: 10),
@@ -3034,13 +3414,15 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await widget.api.createPatrimony(user!['id'] as int, result);
       await load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Patrimônio adicionado.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -3063,6 +3445,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: target,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                 decoration: const InputDecoration(
                     labelText: 'Valor-alvo', prefixText: 'R\$ ')),
             const SizedBox(height: 10),
@@ -3078,8 +3461,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     firstDate: DateTime.now(),
                     lastDate: DateTime(2100),
                     initialDate: DateTime.now());
-                if (date != null)
+                if (date != null) {
                   targetDate.text = date.toIso8601String().split('T').first;
+                }
               },
             ),
           ],
@@ -3117,13 +3501,15 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await widget.api.createGoal(user!['id'] as int, result);
       await load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Meta adicionada.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -3151,6 +3537,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: target,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                 decoration: const InputDecoration(
                     labelText: 'Valor-alvo', prefixText: 'R\$ ')),
             const SizedBox(height: 10),
@@ -3158,6 +3545,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: current,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                 decoration: const InputDecoration(
                     labelText: 'Valor atual', prefixText: 'R\$ ')),
             const SizedBox(height: 10),
@@ -3174,8 +3562,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     lastDate: DateTime(2100),
                     initialDate:
                         DateTime.tryParse(targetDate.text) ?? DateTime.now());
-                if (date != null)
+                if (date != null) {
                   targetDate.text = date.toIso8601String().split('T').first;
+                }
               },
             ),
             const SizedBox(height: 10),
@@ -3232,13 +3621,15 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api
           .updateGoal(user!['id'] as int, goal['id'] as int, result);
       await load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Meta atualizada.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -3248,9 +3639,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.api.deleteGoal(user!['id'] as int, goal['id'] as int);
       await load();
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 
@@ -3276,6 +3668,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: income,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Renda mensal',
                   prefixText: 'R\$ ',
@@ -3286,6 +3679,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: expenses,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: const [TwoDecimalMoneyInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Despesas mensais',
                   prefixText: 'R\$ ',
@@ -3760,13 +4154,15 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     try {
       final bytes = await documentBytes;
       await File(outputPath).writeAsBytes(bytes, flush: true);
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Documento salvo em $outputPath.')));
+      }
     } on ApiException catch (exception) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     }
   }
 

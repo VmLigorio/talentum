@@ -3,6 +3,8 @@ import { ApiError, ClientPermissions, Dashboard, DocumentItem, JsonMap, MarketAl
 export type Workspace = {
   dashboard: Dashboard | null;
   portfolio: Portfolio | null;
+  investmentTransactions: JsonMap[];
+  monthlyPerformance: JsonMap | null;
   patrimony: JsonMap[];
   goals: JsonMap[];
   actionPlan: JsonMap[];
@@ -18,7 +20,7 @@ export type Workspace = {
 };
 
 export const emptyWorkspace: Workspace = {
-  dashboard: null, portfolio: null, patrimony: [], goals: [], actionPlan: [],
+  dashboard: null, portfolio: null, investmentTransactions: [], monthlyPerformance: null, patrimony: [], goals: [], actionPlan: [],
   documents: [], reports: [], profile: null, financialProfile: null,
   notifications: [], notificationPreferences: {}, suitability: null, marketAlerts: [], permissions: null,
 };
@@ -45,6 +47,8 @@ export async function fetchWorkspace(api: TalentumApi, clientId: number) {
   await Promise.all([
     load('dashboard', () => api.dashboard(clientId)),
     load('portfolio', () => api.portfolio(clientId)),
+    load('investmentTransactions', () => api.investmentTransactions(clientId)),
+    load('monthlyPerformance', () => api.investmentMonthlyPerformance(clientId)),
     load('patrimony', () => api.patrimony(clientId)),
     load('goals', () => api.goals(clientId)),
     load('actionPlan', () => api.actionPlan(clientId)),

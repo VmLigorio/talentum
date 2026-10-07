@@ -36,7 +36,8 @@ function harness(fetch, store = new Map(), timers = { setTimeout, clearTimeout }
   }
   const apiModule = load(path.resolve(__dirname, '../src/api.ts'));
   const workspaceModule = load(path.resolve(__dirname, '../src/workspace.ts'));
-  return { ...apiModule, ...workspaceModule, api: new apiModule.TalentumApi(), store, secureStore };
+  const moneyModule = load(path.resolve(__dirname, '../src/money.ts'));
+  return { ...apiModule, ...workspaceModule, ...moneyModule, api: new apiModule.TalentumApi(), store, secureStore };
 }
 
 const response = (status, data) => new Response(status === 204 ? null : JSON.stringify(data), { status });

@@ -61,12 +61,30 @@ class SuitabilityAssessmentCreate(BaseModel):
     confirm_financial_situation: bool
 
 
+class SuitabilityAdvisorAsset(BaseModel):
+    symbol: str = Field(min_length=1, max_length=30)
+    name: str = Field(min_length=1, max_length=160)
+    market: Literal["br", "global"]
+    asset_type: str | None = Field(default=None, max_length=80)
+    currency: str | None = Field(default=None, max_length=10)
+
+
 class SuitabilityAllocation(BaseModel):
     asset_class: str
     label: str
     percentage: int = Field(ge=0, le=100)
     rationale: str
     suballocations: list["SuitabilitySuballocation"] = Field(default_factory=list)
+    advisor_assets: list[SuitabilityAdvisorAsset] = Field(default_factory=list)
+
+
+class SuitabilityAdvisorAllocationUpdate(BaseModel):
+    asset_class: str = Field(min_length=1, max_length=80)
+    assets: list[SuitabilityAdvisorAsset] = Field(max_length=20)
+
+
+class SuitabilityAdvisorProposalUpdate(BaseModel):
+    allocations: list[SuitabilityAdvisorAllocationUpdate] = Field(min_length=1, max_length=20)
 
 
 class SuitabilitySuballocation(BaseModel):
@@ -92,6 +110,8 @@ class SuitabilityRecommendation(BaseModel):
     recommended_actions: list[SuitabilityRecommendedAction] = Field(default_factory=list)
     guardrails: list[str]
     model_version: str = "1"
+    advisor_proposal_published_at: datetime | None = None
+    advisor_proposal_by: str | None = None
 
 
 class SuitabilityAssessmentResponse(BaseModel):

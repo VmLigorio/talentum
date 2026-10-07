@@ -13,6 +13,7 @@ from app.models.notification_preference import NotificationPreference
 from app.models.market_alert import MarketAlert
 from app.models.market_watchlist import MarketWatchlistItem
 from app.models.investment_position import InvestmentPosition
+from app.models.investment_transaction import InvestmentTransaction
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.suitability import SuitabilityAssessment
 
@@ -27,6 +28,7 @@ __all__ = [
     "MarketAlert",
     "MarketWatchlistItem",
     "InvestmentPosition",
+    "InvestmentTransaction",
     "PortfolioSnapshot",
     "FinancialProfile",
     "Goal",

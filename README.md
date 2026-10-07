@@ -87,6 +87,7 @@ Endpoints iniciais:
 - `GET/POST /market/watchlist` — consulta ou adiciona ativos à lista de acompanhamento de um cliente.
 - `DELETE /market/watchlist/{item_id}` — remove um ativo da lista de acompanhamento.
 - `GET /clients/{id}/investment-portfolio` — consolida posições, cotações, resultado e alocação do cliente.
+- `GET/POST /clients/{id}/investment-transactions` — consulta ou registra compras e vendas; o registro atualiza o saldo e o custo médio, incluindo taxas e resultado realizado de vendas.
 - `POST /clients/{id}/investment-positions` — cadastra uma posição de investimento.
 - `PATCH/DELETE /clients/{id}/investment-positions/{position_id}` — altera ou remove uma posição.
 - `GET /clients/{id}/investment-analytics?period=1y` — calcula retorno histórico, contribuição, benchmarks e alertas de leitura.

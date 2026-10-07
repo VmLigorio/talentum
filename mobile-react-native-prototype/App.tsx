@@ -5,6 +5,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
+import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 import {
   ActivityIndicator,
   Alert,
@@ -33,6 +34,7 @@ import {
   User,
 } from './src/api';
 import { emptyWorkspace, fetchWorkspace, Workspace, WorkspaceErrors } from './src/workspace';
+import { formatInvestmentQuantity, formatMoneyInput, moneyCaretOffset, parseMoneyInput } from './src/money';
 
 const api = new TalentumApi();
 const lastCachedClientIdKey = 'talentum_prototype_cached_client_id';
@@ -66,12 +68,69 @@ const dateValue = (value: unknown) => {
   return date.toLocaleDateString('pt-BR');
 };
 
+const dateOnlyValue = (value: unknown) => {
+  const raw = String(value ?? '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.split('-').reverse().join('/') : dateValue(value);
+};
+
 const percentage = (current: unknown, target: unknown) => {
   const currentNumber = Number(current || 0);
   const targetNumber = Number(target || 0);
   if (!targetNumber) return 0;
   return Math.max(0, Math.min(100, (currentNumber / targetNumber) * 100));
 };
+
+function MoneyInput({
+  value,
+  onChangeText,
+  placeholder,
+}: {
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+}) {
+  const [selection, setSelection] = useState({ start: value.length, end: value.length });
+  const selectionRef = useRef(selection);
+  const renderedValueRef = useRef(value);
+  useEffect(() => {
+    if (renderedValueRef.current === value) return;
+    renderedValueRef.current = value;
+    const end = value.length;
+    setSelection({ start: end, end });
+    selectionRef.current = { start: end, end };
+  }, [value]);
+  function change(text: string) {
+    const caret = selectionRef.current.start;
+    const digitsBeforeCaret = (text.slice(0, caret).match(/\d/g) || []).length;
+    const separatorIndex = text.includes(',') ? text.indexOf(',') : text.lastIndexOf('.');
+    const pastDecimal = separatorIndex >= 0 && caret > separatorIndex;
+    const formatted = formatMoneyInput(text);
+    const offset = moneyCaretOffset(formatted, digitsBeforeCaret, pastDecimal);
+    const nextSelection = { start: offset, end: offset };
+    selectionRef.current = nextSelection;
+    renderedValueRef.current = formatted;
+    setSelection(nextSelection);
+    onChangeText(formatted);
+  }
+  return (
+    <View style={styles.moneyInputContainer}>
+      <Text style={styles.moneyInputPrefix}>R$</Text>
+      <TextInput
+        style={styles.moneyInput}
+        keyboardType="decimal-pad"
+        value={value}
+        onChangeText={change}
+        onSelectionChange={(event) => {
+          const next = event.nativeEvent.selection;
+          selectionRef.current = next;
+          setSelection(next);
+        }}
+        selection={selection}
+        placeholder={placeholder}
+      />
+    </View>
+  );
+}
 
 const documentKind = (kind: string) =>
   ({
@@ -122,7 +181,6 @@ export default function App() {
   const [questionnaireVisible, setQuestionnaireVisible] = useState(false);
   const [alertsVisible, setAlertsVisible] = useState(false);
   const [editingAlert, setEditingAlert] = useState<MarketAlert | null>(null);
-  const [suitabilityResponse, setSuitabilityResponse] = useState<string | null>(null);
   const [recordEditor, setRecordEditor] = useState<{ kind: 'patrimony' | 'goal'; item: JsonMap | null } | null>(null);
   const [hideValues, setHideValues] = useState(false);
   const [offlineCacheUsed, setOfflineCacheUsed] = useState(false);
@@ -135,6 +193,19 @@ export default function App() {
     void bootstrap();
     return () => { unsubscribe(); loadVersion.current += 1; };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = setInterval(() => {
+      void api.investmentMonthlyPerformance(user.id).then((data) => {
+        setWorkspace((current) => ({ ...current, monthlyPerformance: data }));
+        setWorkspaceErrors((current) => ({ ...current, monthlyPerformance: undefined }));
+      }).catch((cause) => {
+        setWorkspaceErrors((current) => ({ ...current, monthlyPerformance: cause instanceof Error ? cause.message : 'Não foi possível atualizar o CDI.' }));
+      });
+    }, 60 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [user?.id]);
 
   async function clearWorkspace() {
     const cachedClientId = cacheOwnerId.current;
@@ -163,7 +234,6 @@ export default function App() {
     setQuestionnaire(null);
     setAlertsVisible(false);
     setEditingAlert(null);
-    setSuitabilityResponse(null);
     setRecordEditor(null);
     setOfflineCacheUsed(false);
     await cacheCleanup.catch(() => {});
@@ -222,7 +292,7 @@ export default function App() {
       const stored = await SecureStore.getItemAsync(workspaceCacheKey(currentUser.id));
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.workspace && parsed?.user?.id === currentUser.id) previousWorkspace = parsed.workspace as Workspace;
+        if (parsed?.workspace && parsed?.user?.id === currentUser.id) previousWorkspace = { ...emptyWorkspace, ...parsed.workspace } as Workspace;
       }
     } catch { /* Cache inválido ou indisponível não impede o acesso online. */ }
     if (previousWorkspace) {
@@ -266,7 +336,7 @@ export default function App() {
       const parsed = JSON.parse(stored);
       if (parsed?.user?.id !== clientId || parsed?.user?.role !== 'client' || !parsed?.workspace) return false;
       setUser(parsed.user as User);
-      setWorkspace(parsed.workspace as Workspace);
+      setWorkspace({ ...emptyWorkspace, ...parsed.workspace } as Workspace);
       setWorkspaceErrors({});
       setHideValues((await SecureStore.getItemAsync(`talentum_hide_values_${clientId}`)) === 'true');
       setOfflineCacheUsed(true);
@@ -339,6 +409,21 @@ export default function App() {
     } finally { setBusy(false); }
   }
 
+  async function emitInvestmentReport() {
+    if (!user) return;
+    setBusy(true);
+    try {
+      const localUri = await api.downloadInvestmentReport(user.id);
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Relatório emitido', 'O PDF foi salvo temporariamente, mas não há um aplicativo disponível para compartilhá-lo.');
+        return;
+      }
+      await Sharing.shareAsync(localUri, { mimeType: 'application/pdf', dialogTitle: 'Relatório detalhado da carteira', UTI: 'com.adobe.pdf' });
+    } catch (cause) {
+      Alert.alert('Não foi possível emitir o relatório', cause instanceof Error ? cause.message : 'Tente novamente.');
+    } finally { setBusy(false); }
+  }
+
   async function toggleHideValues(hidden: boolean) {
     setHideValues(hidden);
     if (user) await SecureStore.setItemAsync(`talentum_hide_values_${user.id}`, String(hidden));
@@ -355,6 +440,17 @@ export default function App() {
       setError(cause instanceof Error ? cause.message : 'Não foi possível abrir o questionário.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function acceptSuitability(assessment: JsonMap) {
+    try {
+      const updated = await api.respondToSuitability(Number(assessment.id), 'accepted');
+      setWorkspace((current) => ({ ...current, suitability: updated }));
+      if (user) await SecureStore.deleteItemAsync(workspaceCacheKey(user.id));
+      Alert.alert('Sugestão aceita', 'A sugestão foi registrada na Carteira sugerida.');
+    } catch (cause) {
+      Alert.alert('Não foi possível aceitar', cause instanceof Error ? cause.message : 'Tente novamente.');
     }
   }
 
@@ -506,12 +602,12 @@ export default function App() {
             portfolio={workspace.portfolio}
             notifications={workspace.notifications}
             suitability={workspace.suitability}
-            onSuitabilityResponse={setSuitabilityResponse}
             goals={workspace.goals}
             marketAlerts={workspace.marketAlerts}
             hideValues={hideValues}
             onToggleHideValues={(value) => void toggleHideValues(value)}
             onQuestionnaire={() => void openQuestionnaire()}
+            onAcceptSuitability={(assessment) => void acceptSuitability(assessment)}
             onMarkRead={(item) => void markNotificationRead(item)}
             onMarkAllRead={() => void markAllNotificationsRead()}
             onOpenNotifications={() => setTab('notifications')}
@@ -526,7 +622,7 @@ export default function App() {
             }}
           />
         ) : null}
-        {tab === 'portfolio' ? <ModuleState error={workspaceErrors.portfolio}><PortfolioView portfolio={workspace.portfolio} hideValues={hideValues} /></ModuleState> : null}
+        {tab === 'portfolio' ? <ModuleState error={workspaceErrors.portfolio}><PortfolioView portfolio={workspace.portfolio} transactions={workspace.investmentTransactions} monthlyPerformance={workspace.monthlyPerformance} monthlyPerformanceError={workspaceErrors.monthlyPerformance} hideValues={hideValues} onEmitReport={() => void emitInvestmentReport()} /></ModuleState> : null}
         {tab === 'patrimony' ? <ModuleState error={workspaceErrors.patrimony}><PatrimonyView items={workspace.patrimony} hideValues={hideValues} canEdit={Boolean(workspace.permissions?.can_edit_patrimony)} onEdit={(item) => setRecordEditor({ kind: 'patrimony', item })} onCreate={() => setRecordEditor({ kind: 'patrimony', item: null })} /></ModuleState> : null}
         {tab === 'goals' ? <GoalsView goals={workspace.goals} actionPlan={workspace.actionPlan} errors={workspaceErrors} hideValues={hideValues} canEdit={Boolean(workspace.permissions?.can_edit_goals)} onEdit={(item) => setRecordEditor({ kind: 'goal', item })} onCreate={() => setRecordEditor({ kind: 'goal', item: null })} /> : null}
         {tab === 'documents' ? <ModuleState error={workspaceErrors.documents}><DocumentsView documents={workspace.documents} onOpen={(document) => void openDocument(document)} /></ModuleState> : null}
@@ -562,16 +658,6 @@ export default function App() {
         onSaved={(assessment) => {
           setWorkspace((current) => ({ ...current, suitability: assessment }));
           setQuestionnaireVisible(false);
-        }}
-      />
-      <SuitabilityResponseModal
-        visible={Boolean(suitabilityResponse)}
-        response={suitabilityResponse}
-        assessment={workspace.suitability}
-        onClose={() => setSuitabilityResponse(null)}
-        onSaved={(assessment) => {
-          setWorkspace((current) => ({ ...current, suitability: assessment }));
-          setSuitabilityResponse(null);
         }}
       />
       <RecordEditorModal
@@ -673,12 +759,12 @@ function SummaryView({
   portfolio,
   notifications,
   suitability,
-  onSuitabilityResponse,
   goals,
   marketAlerts,
   hideValues,
   onToggleHideValues,
   onQuestionnaire,
+  onAcceptSuitability,
   onMarkRead,
   onMarkAllRead,
   onOpenNotifications,
@@ -691,12 +777,12 @@ function SummaryView({
   portfolio: Portfolio | null;
   notifications: NotificationItem[];
   suitability: JsonMap | null;
-  onSuitabilityResponse: (response: string) => void;
   goals: JsonMap[];
   marketAlerts: MarketAlert[];
   hideValues: boolean;
   onToggleHideValues: (hidden: boolean) => void;
   onQuestionnaire: () => void;
+  onAcceptSuitability: (assessment: JsonMap) => void;
   onMarkRead: (item: NotificationItem) => void;
   onMarkAllRead: () => void;
   onOpenNotifications: () => void;
@@ -746,7 +832,7 @@ function SummaryView({
         />
       </ModuleState>
       <ModuleState error={errors.suitability && 'Suitability: ' + errors.suitability}>
-        <SuitabilityCard assessment={suitability} hideValues={hideValues} onQuestionnaire={onQuestionnaire} onResponse={onSuitabilityResponse} />
+        <SuitabilityCard assessment={suitability} onQuestionnaire={onQuestionnaire} onAccept={onAcceptSuitability} />
       </ModuleState>
       <ModuleState error={errors.marketAlerts && 'Alertas de preço: ' + errors.marketAlerts}>
         <AlertCard alerts={marketAlerts} onNew={onNewAlert} onEdit={onEditAlert} />
@@ -764,15 +850,100 @@ function SummaryView({
   );
 }
 
-function PortfolioView({ portfolio, hideValues }: { portfolio: Portfolio | null; hideValues: boolean }) {
+const portfolioColors = ['#5d4bc4', '#20a58a', '#f0a43a', '#e45b73', '#4195d3', '#8769b4', '#94b84b', '#e17c3e'];
+
+function PortfolioDonut({ positions, currency }: { positions: Portfolio['positions']; currency: string }) {
+  const items = positions.filter((position) => (position.currency || 'BRL') === currency && Number(position.allocation_percent || 0) > 0);
+  if (!items.length) return null;
+  const radius = 39;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return <View style={styles.donutWrap}>
+    <View style={styles.donutGraphic}>
+      <Svg width={132} height={132} viewBox="0 0 104 104">
+        <Circle cx="52" cy="52" r={radius} fill="none" stroke="#eeeaf5" strokeWidth="18" />
+        {items.map((item, index) => {
+          const ratio = Math.max(0, Math.min(100, Number(item.allocation_percent || 0))) / 100;
+          const segment = circumference * ratio;
+          const element = <Circle key={item.id} cx="52" cy="52" r={radius} fill="none" stroke={portfolioColors[index % portfolioColors.length]} strokeWidth="18" strokeDasharray={`${segment} ${circumference - segment}`} strokeDashoffset={-offset} transform="rotate(-90 52 52)" />;
+          offset += segment;
+          return element;
+        })}
+      </Svg>
+      <View pointerEvents="none" style={styles.donutCenter}><Text style={styles.donutCenterLabel}>{currency}</Text><Text style={styles.donutCenterValue}>{items.length} ativos</Text></View>
+    </View>
+    <View style={styles.donutLegend}>{items.map((item, index) => <View key={item.id} style={styles.donutLegendRow}><View style={[styles.donutDot, { backgroundColor: portfolioColors[index % portfolioColors.length] }]} /><Text numberOfLines={1} style={styles.donutLegendName}>{item.symbol}</Text><Text style={styles.donutLegendPct}>{Number(item.allocation_percent || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</Text></View>)}</View>
+  </View>;
+}
+
+function MonthlyReturnGraph({ points, cdiAvailable }: { points: JsonMap[]; cdiAvailable: boolean }) {
+  const width = 320; const height = 156; const pad = 12;
+  if (!points.length) return <Text style={styles.muted}>O histórico mensal ainda está sendo formado.</Text>;
+  const values = points.flatMap((point) => [Number(point.return_percent || 0), ...(cdiAvailable && point.cdi_return_percent != null ? [Number(point.cdi_return_percent)] : [])]);
+  let min = Math.min(0, ...values); let max = Math.max(0, ...values);
+  if (max - min < 0.15) { max += 0.1; min -= 0.1; }
+  const x = (index: number) => pad + (points.length <= 1 ? 0 : index * (width - pad * 2) / (points.length - 1));
+  const y = (value: number) => pad + (max - value) * (height - pad * 2) / (max - min);
+  const portfolioLine = points.map((point, index) => `${x(index)},${y(Number(point.return_percent || 0))}`).join(' ');
+  const cdiPoints = points.map((point, index) => point.cdi_return_percent == null ? null : `${x(index)},${y(Number(point.cdi_return_percent))}`).filter(Boolean).join(' ');
+  return <View style={styles.monthlyGraph}>
+    <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+      <Line x1={pad} y1={y(0)} x2={width - pad} y2={y(0)} stroke="#d9d6e2" strokeDasharray="4 4" />
+      {points.length > 1 ? <Polyline points={portfolioLine} fill="none" stroke="#5d4bc4" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" /> : null}
+      {cdiAvailable && points.filter((point) => point.cdi_return_percent != null).length > 1 ? <Polyline points={cdiPoints} fill="none" stroke="#20a58a" strokeWidth="2.5" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" /> : null}
+    </Svg>
+    <View style={styles.monthlyGraphAxis}><Text style={styles.muted}>{String(points[0].date).slice(5)}</Text><Text style={styles.muted}>{String(points[points.length - 1].date).slice(5)}</Text></View>
+    <View style={styles.graphLegend}><View style={styles.graphLegendItem}><View style={[styles.graphLineSample, { backgroundColor: '#5d4bc4' }]} /><Text style={styles.muted}>Carteira</Text></View>{cdiAvailable ? <View style={styles.graphLegendItem}><View style={[styles.graphLineSample, { backgroundColor: '#20a58a' }]} /><Text style={styles.muted}>CDI</Text></View> : null}</View>
+  </View>;
+}
+
+function MonthlyPerformance({ data, error, hideValues }: { data: JsonMap | null; error?: string; hideValues: boolean }) {
+  const currencies = Array.isArray(data?.currencies) ? data.currencies as JsonMap[] : [];
+  const month = String(data?.month || '').split('-').reverse().join('/');
+  return <View style={styles.card}>
+    <Text style={styles.cardTitle}>Rendimento no mês</Text>
+    {error ? <Text style={styles.muted}>{error}</Text> : null}
+    {!error && !currencies.length ? <Text style={styles.muted}>O histórico do mês será exibido após as primeiras atualizações da carteira.</Text> : null}
+    {currencies.map((item) => {
+      const currency = String(item.currency || 'BRL');
+      const points = Array.isArray(item.points) ? item.points as JsonMap[] : [];
+      const cdi = currency === 'BRL' ? item.cdi_percent : null;
+      const hasData = item.data_available === true;
+      return <View key={currency} style={styles.monthlyCurrency}>
+        <View style={styles.rowBetween}><Text style={styles.subsectionTitle}>{currency} · {month}</Text>{item.source_status === 'partial' ? <Text style={styles.badge}>Dados parciais</Text> : null}</View>
+        {!item.full_month_to_date && item.coverage_start ? <Text style={styles.muted}>Histórico disponível desde {dateOnlyValue(item.coverage_start)}.</Text> : null}
+        <View style={styles.monthlyMetrics}>
+          <Metric label="Valor investido" value={hideValues ? '••••••' : money(item.invested_value, currency)} />
+          <Metric label="Rendimento" value={!hasData ? '—' : hideValues ? '••••••' : money(item.profit_value, currency)} />
+          <Metric label="Rendimento %" value={hasData ? `${Number(item.return_percent).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%` : '—'} />
+          <Metric label={currency === 'BRL' ? 'CDI no mês' : 'CDI'} value={currency === 'BRL' && cdi != null ? `${Number(cdi).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%` : '—'} />
+          <Metric label="Acima do CDI" value={currency === 'BRL' && item.excess_percentage_points != null ? `${Number(item.excess_percentage_points) >= 0 ? '+' : ''}${Number(item.excess_percentage_points).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} p.p.` : '—'} />
+          <Metric label="Equivale a" value={currency === 'BRL' && item.percent_of_cdi != null ? `${Number(item.percent_of_cdi).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% do CDI` : '—'} />
+        </View>
+        {item.source_status === 'insufficient' || !hasData ? <Text style={styles.muted}>Precisamos de pelo menos duas atualizações completas para calcular o rendimento.</Text> : <MonthlyReturnGraph points={points} cdiAvailable={currency === 'BRL' && cdi != null} />}
+      </View>;
+    })}
+    {currencies.some((item) => item.data_available) ? <Text style={styles.muted}>Estimativa baseada nos snapshots e no resultado das posições abertas; aportes, retiradas e vendas realizadas podem alterar o resultado mensal.</Text> : null}
+    {data?.cdi_status === 'cached' ? <Text style={styles.muted}>CDI: último dado em cache de {data?.cdi_as_of ? dateOnlyValue(data.cdi_as_of) : 'data indisponível'}.</Text> : data?.cdi_as_of ? <Text style={styles.muted}>CDI oficial atualizado em {dateOnlyValue(data.cdi_as_of)}.</Text> : <Text style={styles.muted}>CDI oficial indisponível no momento.</Text>}
+  </View>;
+}
+
+function PortfolioView({ portfolio, transactions, monthlyPerformance, monthlyPerformanceError, hideValues, onEmitReport }: { portfolio: Portfolio | null; transactions: JsonMap[]; monthlyPerformance: JsonMap | null; monthlyPerformanceError?: string; hideValues: boolean; onEmitReport: () => void }) {
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Carteira de investimentos</Text>
+      <Pressable onPress={onEmitReport} style={styles.outlineWideButton}><Text style={styles.outlineButtonText}>Emitir relatório detalhado (PDF)</Text></Pressable>
       <View style={styles.cardGrid}>
         <Metric label="Investido" value={hideValues ? '••••••' : money(portfolio?.invested_total)} />
         <Metric label="Atualizado" value={hideValues ? '••••••' : money(portfolio?.current_total)} />
         <Metric label="Resultado" value={hideValues ? '••••••' : money(portfolio?.pnl_total)} />
       </View>
+      {portfolio?.positions?.length ? <View style={styles.card}>
+        <Text style={styles.cardTitle}>Distribuição da carteira</Text>
+        {Array.from(new Set(portfolio.positions.map((position) => position.currency || 'BRL'))).sort().map((currency) => <View key={currency} style={styles.allocationCurrency}><Text style={styles.subsectionTitle}>{currency}</Text><PortfolioDonut positions={portfolio.positions} currency={currency} /></View>)}
+        {portfolio.mixed_currency ? <Text style={styles.muted}>As moedas são exibidas separadamente, sem conversão cambial.</Text> : null}
+      </View> : null}
+      <MonthlyPerformance data={monthlyPerformance} error={monthlyPerformanceError} hideValues={hideValues} />
       {(portfolio?.positions || []).map((position) => (
         <View style={styles.card} key={position.id}>
           <View style={styles.rowBetween}>
@@ -780,11 +951,27 @@ function PortfolioView({ portfolio, hideValues }: { portfolio: Portfolio | null;
             <Text style={styles.badge}>{marketLabel(position.market)}</Text>
           </View>
           <Text style={styles.muted}>{position.name || 'Ativo sem nome informado'}</Text>
-          <Text style={styles.bodyText}>{hideValues ? '•••• cotas/ações · médio ••••••' : `${position.quantity} cotas/ações · médio ${money(position.average_price, position.currency === 'USD' ? 'USD' : 'BRL')}`}</Text>
+          <Text style={styles.bodyText}>{hideValues ? '•••• cotas · médio ••••••' : `${formatInvestmentQuantity(position.quantity)} cotas · médio ${money(position.average_price, position.currency === 'USD' ? 'USD' : 'BRL')}`}</Text>
           <Text style={styles.bodyText}>Atual: {hideValues ? '••••••' : position.current_value == null ? 'Cotação indisponível' : money(position.current_value, position.currency === 'USD' ? 'USD' : 'BRL')}</Text>
           <Text style={styles.bodyText}>Resultado: {hideValues ? '••••••' : position.pnl == null ? '—' : money(position.pnl, position.currency === 'USD' ? 'USD' : 'BRL')} {hideValues || position.pnl_percent == null ? '' : '(' + Number(position.pnl_percent).toFixed(2) + '%)'}</Text>
         </View>
       ))}
+      {transactions.length ? <View style={styles.card}>
+        <Text style={styles.cardTitle}>Histórico de operações</Text>
+        {transactions.map((operation) => {
+          const isBuy = operation.operation_type === 'buy';
+          const isVoided = operation.voided_at != null;
+          const currency = String(operation.currency || 'BRL');
+          return <View style={styles.listRow} key={String(operation.id)}>
+            <View style={styles.flexOne}>
+              <Text style={styles.cardTitle}>{isBuy ? 'Compra' : 'Venda'}{isVoided ? ' anulada' : ''} · {textValue(operation.symbol)}</Text>
+              <Text style={styles.muted}>{isVoided ? `Motivo: ${textValue(operation.void_reason, 'não informado')}` : `${dateOnlyValue(operation.operation_date)} · ${formatInvestmentQuantity(operation.quantity)} cotas × ${money(operation.unit_price, currency)} · taxas ${money(operation.fees, currency)}`}</Text>
+              {!isVoided && operation.realized_pnl != null ? <Text style={styles.muted}>Resultado realizado: {hideValues ? '••••••' : money(operation.realized_pnl, currency)}</Text> : null}
+            </View>
+            <Text style={styles.bodyText}>{isVoided ? 'Anulada' : hideValues ? '••••••' : money(operation.net_value, currency)}</Text>
+          </View>;
+        })}
+      </View> : <Text style={styles.muted}>Ainda não há compras ou vendas registradas. Saldos cadastrados antes do início do histórico aparecem como posição inicial.</Text>}
       {!portfolio?.positions?.length ? <Text style={styles.muted}>Nenhuma posição cadastrada.</Text> : null}
     </View>
   );
@@ -930,14 +1117,20 @@ function ProfileView({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    setIncome(String(financialProfile?.monthly_income ?? '0'));
-    setExpenses(String(financialProfile?.monthly_expenses ?? '0'));
+    setIncome(formatMoneyInput(String(financialProfile?.monthly_income ?? '0')));
+    setExpenses(formatMoneyInput(String(financialProfile?.monthly_expenses ?? '0')));
     setRiskProfile(String(financialProfile?.risk_profile ?? ''));
   }, [financialProfile]);
   async function saveFinancial() {
+    const normalizedIncome = parseMoneyInput(income);
+    const normalizedExpenses = parseMoneyInput(expenses);
+    if (!Number.isFinite(normalizedIncome) || normalizedIncome < 0 || !Number.isFinite(normalizedExpenses) || normalizedExpenses < 0) {
+      Alert.alert('Confira os valores', 'Informe renda e despesas válidas, sem valores negativos.');
+      return;
+    }
     setSaving(true);
     try {
-      await api.updateFinancialProfile(clientId, { monthly_income: Number(income.replace(',', '.')), monthly_expenses: Number(expenses.replace(',', '.')), risk_profile: riskProfile.trim() || null });
+      await api.updateFinancialProfile(clientId, { monthly_income: normalizedIncome, monthly_expenses: normalizedExpenses, risk_profile: riskProfile.trim() || null });
       setFinancialEditor(false); onSaved();
     } catch (cause) { Alert.alert('Não foi possível salvar', cause instanceof Error ? cause.message : 'Tente novamente.'); }
     finally { setSaving(false); }
@@ -1008,7 +1201,7 @@ function ProfileView({
       </View>
       <Pressable onPress={() => setPasswordEditor(true)} style={styles.outlineWideButton}><Text style={styles.outlineButtonText}>Alterar senha</Text></Pressable>
       <Text style={styles.muted}>Para alterar seus dados cadastrais, solicite a atualização ao Advisor responsável.</Text>
-      <Modal visible={financialEditor} animationType="slide" onRequestClose={() => setFinancialEditor(false)}><SafeAreaView style={styles.modalSafe}><ScrollView contentContainerStyle={styles.modalContent}><View style={styles.rowBetween}><Text style={styles.sectionTitle}>Editar perfil financeiro</Text><Pressable onPress={() => setFinancialEditor(false)}><Text style={styles.link}>Fechar</Text></Pressable></View><TextInput style={styles.input} keyboardType="decimal-pad" value={income} onChangeText={setIncome} placeholder="Renda mensal" /><TextInput style={styles.input} keyboardType="decimal-pad" value={expenses} onChangeText={setExpenses} placeholder="Despesas mensais" /><TextInput style={styles.input} value={riskProfile} onChangeText={setRiskProfile} placeholder="Perfil de risco (opcional)" /><Pressable disabled={saving} onPress={() => void saveFinancial()} style={styles.primaryButton}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Salvar</Text>}</Pressable></ScrollView></SafeAreaView></Modal>
+      <Modal visible={financialEditor} animationType="slide" onRequestClose={() => setFinancialEditor(false)}><SafeAreaView style={styles.modalSafe}><ScrollView contentContainerStyle={styles.modalContent}><View style={styles.rowBetween}><Text style={styles.sectionTitle}>Editar perfil financeiro</Text><Pressable onPress={() => setFinancialEditor(false)}><Text style={styles.link}>Fechar</Text></Pressable></View><MoneyInput value={income} onChangeText={setIncome} placeholder="Renda mensal" /><MoneyInput value={expenses} onChangeText={setExpenses} placeholder="Despesas mensais" /><TextInput style={styles.input} value={riskProfile} onChangeText={setRiskProfile} placeholder="Perfil de risco (opcional)" /><Pressable disabled={saving} onPress={() => void saveFinancial()} style={styles.primaryButton}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Salvar</Text>}</Pressable></ScrollView></SafeAreaView></Modal>
       <Modal visible={passwordEditor} animationType="slide" onRequestClose={() => setPasswordEditor(false)}><SafeAreaView style={styles.modalSafe}><ScrollView contentContainerStyle={styles.modalContent}><View style={styles.rowBetween}><Text style={styles.sectionTitle}>Alterar senha</Text><Pressable onPress={() => setPasswordEditor(false)}><Text style={styles.link}>Fechar</Text></Pressable></View><TextInput style={styles.input} secureTextEntry value={currentPassword} onChangeText={setCurrentPassword} placeholder="Senha atual" /><TextInput style={styles.input} secureTextEntry value={newPassword} onChangeText={setNewPassword} placeholder="Nova senha (mínimo 8 caracteres)" /><TextInput style={styles.input} secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirme a nova senha" /><Pressable disabled={saving} onPress={() => void savePassword()} style={styles.primaryButton}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Atualizar senha</Text>}</Pressable></ScrollView></SafeAreaView></Modal>
     </View>
   );
@@ -1064,74 +1257,57 @@ function NotificationsView({ notifications, onMarkRead, onMarkAllRead }: { notif
 
 function SuitabilityCard({
   assessment,
-  hideValues,
   onQuestionnaire,
-  onResponse,
+  onAccept,
 }: {
   assessment: JsonMap | null;
-  hideValues: boolean;
   onQuestionnaire: () => void;
-  onResponse: (response: string) => void;
+  onAccept: (assessment: JsonMap) => void;
 }) {
   const recommendation = assessment?.recommendation;
   const allocations = Array.isArray(recommendation?.allocations) ? recommendation.allocations : [];
   return (
     <View style={styles.card}>
       <View style={styles.rowBetween}>
-        <Text style={styles.cardTitle}>Perfil e carteira sugerida</Text>
-        <Text style={styles.badge}>{assessment ? textValue(assessment.status) : 'Pendente'}</Text>
+        <Text style={styles.cardTitle}>Carteira sugerida</Text>
+        <Pressable onPress={onQuestionnaire}>
+          <Text style={styles.link}>{assessment ? 'Atualizar' : 'Responder'}</Text>
+        </Pressable>
       </View>
       {assessment ? (
         <>
-          <Text style={styles.bodyText}>{textValue(assessment.objective_label)} · {textValue(assessment.risk_profile_label)}</Text>
-          <Text style={styles.muted}>Status: {suitabilityStatusLabel(textValue(assessment.status))}</Text>
-          {assessment.risk_profile_description ? <Text style={styles.bodyText}>{String(assessment.risk_profile_description)}</Text> : null}
-          {assessment.financial_situation ? <FinancialSnapshot snapshot={assessment.financial_situation} hideValues={hideValues} /> : <Text style={styles.muted}>Esta avaliação anterior não contém registro financeiro confirmado.</Text>}
-          <Text style={styles.muted}>{textValue(recommendation?.summary)}</Text>
-          {Array.isArray(recommendation?.recommended_actions) && recommendation.recommended_actions.length ? <>
-            <Text style={styles.subsectionTitle}>Próximas ações para validar a carteira</Text>
-            {recommendation.recommended_actions.map((action: JsonMap, index: number) => <View key={String(index)} style={styles.question}><Text style={styles.cardTitle}>{textValue(action.title)}</Text><Text style={styles.muted}>{textValue(action.detail)}</Text></View>)}
-          </> : null}
-          <Text style={styles.subsectionTitle}>Alocação de referência</Text>
-          {allocations.map((allocation: JsonMap, index: number) => (
+          {recommendation?.advisor_proposal_published_at ? <Text style={styles.bodyText}>Sugestão personalizada do Advisor</Text> : null}
+          <Text style={styles.subsectionTitle}>Divisão da carteira</Text>
+          {allocations.length ? allocations.map((allocation: JsonMap, index: number) => (
             <View key={String(index)} style={styles.question}>
-              <View style={styles.listRow}><Text style={styles.bodyText}>{textValue(allocation.label)}</Text><Text style={styles.badge}>{textValue(allocation.percentage)}%</Text></View>
-              {(Array.isArray(allocation.suballocations) ? allocation.suballocations : []).map((segment: JsonMap, child: number) => <Text key={String(child)} style={styles.muted}>• {textValue(segment.label)} — {textValue(segment.percentage)}% da carteira{Array.isArray(segment.examples) && segment.examples.length ? ` · Exemplos para análise: ${segment.examples.join(', ')}` : ''}</Text>)}
+              <View style={styles.listRow}>
+                <Text style={styles.bodyText}>{textValue(allocation.label)}</Text>
+                <Text style={styles.badge}>{textValue(allocation.percentage)}%</Text>
+              </View>
+              {(Array.isArray(allocation.suballocations) ? allocation.suballocations : []).map((segment: JsonMap, child: number) => (
+                <View key={String(child)} style={styles.question}>
+                  <Text style={styles.bodyText}>{textValue(segment.label)} — {textValue(segment.percentage)}%</Text>
+                  {Array.isArray(segment.examples) && segment.examples.length ? (
+                    <Text style={styles.muted}>Ativos sugeridos: {segment.examples.join(', ')}</Text>
+                  ) : null}
+                </View>
+              ))}
+              {(Array.isArray(allocation.advisor_assets) ? allocation.advisor_assets : []).map((asset: JsonMap, assetIndex: number) => (
+                <View key={`advisor-${assetIndex}`} style={styles.question}>
+                  <Text style={styles.muted}>Selecionado pelo Advisor: {textValue(asset.symbol)} — {textValue(asset.name)}</Text>
+                </View>
+              ))}
             </View>
-          ))}
-          <Text style={styles.muted}>Modelo educativo. Ativos citados são exemplos para análise. A aprovação do Advisor não executa operações.</Text>
-          {assessment.status === 'approved' ? <>
-            <Text style={styles.bodyText}>Sua resposta: {clientResponseLabel(textValue(assessment.client_response, 'pending'))}</Text>
-            {assessment.client_response_note ? <Text style={styles.muted}>Observação: {String(assessment.client_response_note)}</Text> : null}
-            {(!assessment.client_response || assessment.client_response === 'pending') ? <View style={styles.optionWrap}>
-              <OptionButton label="Aceitar carteira-modelo" active={false} onPress={() => onResponse('accepted')} />
-              <OptionButton label="Pedir ajustes" active={false} onPress={() => onResponse('adjustment_requested')} />
-              <OptionButton label="Recusar proposta" active={false} onPress={() => onResponse('declined')} />
-            </View> : null}
-          </> : null}
+          )) : <Text style={styles.muted}>A divisão sugerida ainda não está disponível.</Text>}
+          {recommendation?.advisor_proposal_published_at && assessment.status === 'approved' && assessment.client_response === 'pending' ? (
+            <Pressable onPress={() => onAccept(assessment)} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Aceitar sugestão do Advisor</Text></Pressable>
+          ) : assessment.client_response === 'accepted' ? <Text style={styles.bodyText}>Você aceitou esta sugestão do Advisor.</Text> : null}
         </>
       ) : (
-        <Text style={styles.muted}>Responda ao questionário para receber uma sugestão por objetivo e risco.</Text>
+        <Text style={styles.muted}>Responda ao questionário para ver a divisão e os ativos sugeridos.</Text>
       )}
-      <Pressable onPress={onQuestionnaire} style={styles.smallButton}>
-        <Text style={styles.primaryButtonText}>{assessment ? 'Refazer questionário' : 'Responder questionário'}</Text>
-      </Pressable>
     </View>
   );
-}
-
-function suitabilityStatusLabel(status: string) {
-  if (status === 'approved') return 'Aprovada pelo Advisor';
-  if (status === 'rejected') return 'Aguardando nova validação';
-  if (status === 'superseded') return 'Substituída por avaliação mais recente';
-  return 'Aguardando validação do Advisor';
-}
-
-function clientResponseLabel(response: string) {
-  if (response === 'accepted') return 'Aceita pelo cliente';
-  if (response === 'declined') return 'Recusada pelo cliente';
-  if (response === 'adjustment_requested') return 'Ajustes solicitados';
-  return 'Aguardando sua resposta';
 }
 
 function FinancialSnapshot({ snapshot, hideValues = false }: { snapshot: JsonMap; hideValues?: boolean }) {
@@ -1281,45 +1457,6 @@ function SuitabilityModal({
   );
 }
 
-function SuitabilityResponseModal({
-  visible,
-  response,
-  assessment,
-  onClose,
-  onSaved,
-}: {
-  visible: boolean;
-  response: string | null;
-  assessment: JsonMap | null;
-  onClose: () => void;
-  onSaved: (assessment: JsonMap) => void;
-}) {
-  const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { if (visible) setNote(''); }, [visible, response]);
-  const labels: JsonMap = { accepted: 'Aceitar esta carteira-modelo?', declined: 'Recusar esta proposta?', adjustment_requested: 'Solicitar ajustes ao Advisor?' };
-  async function submit() {
-    if (!assessment?.id || !response) return;
-    setSaving(true);
-    try {
-      onSaved(await api.respondToSuitability(Number(assessment.id), response, note.trim() || undefined));
-    } catch (cause) {
-      Alert.alert('Não foi possível registrar a resposta', cause instanceof Error ? cause.message : 'Tente novamente.');
-    } finally { setSaving(false); }
-  }
-  return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-    <View style={styles.dialogBackdrop}><View style={styles.dialogCard}>
-      <Text style={styles.sectionTitle}>{textValue(labels[response || ''], 'Confirmar resposta')}</Text>
-      <Text style={styles.muted}>Sua resposta ficará registrada para acompanhamento do Advisor. Nenhuma operação será realizada.</Text>
-      {response !== 'accepted' ? <TextInput style={styles.input} multiline maxLength={1000} value={note} onChangeText={setNote} placeholder="Observação opcional para o Advisor" /> : null}
-      <View style={styles.optionWrap}>
-        <Pressable onPress={onClose} style={styles.outlineButton}><Text style={styles.outlineButtonText}>Voltar</Text></Pressable>
-        <Pressable disabled={saving} onPress={() => void submit()} style={styles.primaryButton}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Confirmar</Text>}</Pressable>
-      </View>
-    </View></View>
-  </Modal>;
-}
-
 function RecordEditorModal({
   visible,
   kind,
@@ -1349,13 +1486,13 @@ function RecordEditorModal({
     setTitle(String(item?.title ?? item?.description ?? ''));
     setCategory(String(item?.category ?? ''));
     setInstitution(String(item?.institution ?? ''));
-    setAmount(String(item?.target_value ?? item?.value ?? ''));
-    setCurrentAmount(String(item?.current_value ?? '0'));
+    setAmount(formatMoneyInput(String(item?.target_value ?? item?.value ?? '')));
+    setCurrentAmount(formatMoneyInput(String(item?.current_value ?? '0')));
     setTargetDate(String(item?.target_date ?? '').slice(0, 10));
     setNotes(String(item?.notes ?? ''));
     setStatus(String(item?.status ?? 'active'));
   }, [visible, item, kind]);
-  function numeric(value: string) { return Number(value.replace(',', '.')); }
+  function numeric(value: string) { return parseMoneyInput(value); }
   async function submit() {
     if (!title.trim() || !Number.isFinite(numeric(amount)) || numeric(amount) <= 0 || (kind === 'goal' && !Number.isFinite(numeric(currentAmount)))) {
       Alert.alert('Confira os dados', 'Informe uma descrição e valores válidos.'); return;
@@ -1381,9 +1518,9 @@ function RecordEditorModal({
         <TextInput style={styles.input} value={category} onChangeText={setCategory} placeholder="Categoria (ex.: imóvel, reserva)" />
         <TextInput style={styles.input} value={institution} onChangeText={setInstitution} placeholder="Instituição (opcional)" />
       </> : null}
-      <TextInput style={styles.input} keyboardType="decimal-pad" value={amount} onChangeText={setAmount} placeholder={kind === 'goal' ? 'Valor desejado' : 'Valor'} />
+      <MoneyInput value={amount} onChangeText={setAmount} placeholder={kind === 'goal' ? 'Valor desejado' : 'Valor'} />
       {kind === 'goal' ? <>
-        <TextInput style={styles.input} keyboardType="decimal-pad" value={currentAmount} onChangeText={setCurrentAmount} placeholder="Valor já acumulado" />
+        <MoneyInput value={currentAmount} onChangeText={setCurrentAmount} placeholder="Valor já acumulado" />
         <TextInput style={styles.input} value={targetDate} onChangeText={setTargetDate} placeholder="Prazo (AAAA-MM-DD)" />
         {item ? <View style={styles.optionWrap}>{[['active', 'Ativa'], ['paused', 'Pausada'], ['completed', 'Concluída']].map(([value, label]) => <OptionButton key={value} label={label} active={status === value} onPress={() => setStatus(value)} />)}</View> : null}
       </> : <TextInput style={styles.input} value={notes} onChangeText={setNotes} placeholder="Observações (opcional)" />}
@@ -1413,12 +1550,12 @@ function AlertEditorModal({
   useEffect(() => {
     setSymbol(initial?.symbol || '');
     setMarket(initial?.market || 'br');
-    setTargetPrice(initial ? String(initial.target_price) : '');
+    setTargetPrice(initial ? formatMoneyInput(String(initial.target_price)) : '');
     setCondition(initial?.condition || 'at_or_below');
   }, [initial, visible]);
 
   async function save() {
-    const normalizedPrice = Number(targetPrice.replace(',', '.'));
+    const normalizedPrice = parseMoneyInput(targetPrice);
     if (!symbol.trim() || !Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
       Alert.alert('Dados incompletos', 'Informe o ativo e um preço-alvo válido.');
       return;
@@ -1484,14 +1621,7 @@ function AlertEditorModal({
             <OptionButton label="Brasil — B3" active={market === 'br'} onPress={() => setMarket('br')} disabled={Boolean(initial)} />
             <OptionButton label="Exterior" active={market === 'global'} onPress={() => setMarket('global')} disabled={Boolean(initial)} />
           </View>
-          <TextInput
-            keyboardType="decimal-pad"
-            placeholder="Preço-alvo"
-            placeholderTextColor="#9895a8"
-            style={styles.input}
-            value={targetPrice}
-            onChangeText={setTargetPrice}
-          />
+          <MoneyInput value={targetPrice} onChangeText={setTargetPrice} placeholder="Preço-alvo" />
           <Text style={styles.subsectionTitle}>Condição</Text>
           <View style={styles.optionWrap}>
             <OptionButton label="Atingir ou ficar abaixo" active={condition === 'at_or_below'} onPress={() => setCondition('at_or_below')} />
@@ -1596,6 +1726,9 @@ const styles = StyleSheet.create({
   muted: { color: '#77758a', fontSize: 13, lineHeight: 20 },
   bodyText: { color: '#211f35', fontSize: 13, lineHeight: 20 },
   input: { height: 48, paddingHorizontal: 14, borderWidth: 1, borderColor: '#e8e6ef', borderRadius: 11, color: '#211f35', backgroundColor: '#fff' },
+  moneyInputContainer: { minHeight: 48, paddingLeft: 14, paddingRight: 8, marginBottom: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#e8e6ef', borderRadius: 11, backgroundColor: '#fff' },
+  moneyInputPrefix: { marginRight: 8, color: '#6c687d', fontWeight: '600' },
+  moneyInput: { flex: 1, height: 48, paddingVertical: 0, color: '#211f35' },
   disabledInput: { color: '#9895a8', backgroundColor: '#f2f0f5' },
   primaryButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 11, backgroundColor: '#5d4bc4', paddingHorizontal: 14 },
   primaryButtonText: { color: '#fff', fontWeight: '800', textAlign: 'center' },
@@ -1612,6 +1745,24 @@ const styles = StyleSheet.create({
   tabText: { color: '#77758a', fontSize: 12, fontWeight: '700' },
   activeTabText: { color: '#5d4bc4' },
   cardGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  allocationCurrency: { marginTop: 14, gap: 8 },
+  donutWrap: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  donutGraphic: { width: 132, height: 132, alignItems: 'center', justifyContent: 'center' },
+  donutCenter: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  donutCenterLabel: { color: '#211f35', fontSize: 14, fontWeight: '800' },
+  donutCenterValue: { color: '#77758a', fontSize: 10 },
+  donutLegend: { flex: 1, gap: 5 },
+  donutLegendRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  donutDot: { width: 8, height: 8, borderRadius: 4 },
+  donutLegendName: { flex: 1, color: '#77758a', fontSize: 11 },
+  donutLegendPct: { color: '#211f35', fontSize: 11, fontWeight: '700' },
+  monthlyCurrency: { gap: 9, paddingTop: 10 },
+  monthlyMetrics: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  monthlyGraph: { width: '100%', padding: 8, borderRadius: 12, backgroundColor: '#faf9ff' },
+  monthlyGraphAxis: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8 },
+  graphLegend: { flexDirection: 'row', gap: 16, paddingHorizontal: 8, paddingTop: 8 },
+  graphLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  graphLineSample: { width: 18, height: 3, borderRadius: 2 },
   metric: { flexGrow: 1, flexBasis: '46%', padding: 13, borderWidth: 1, borderColor: '#eeeaf9', borderRadius: 12, backgroundColor: '#fff' },
   metricLabel: { color: '#77758a', fontSize: 11 },
   metricValue: { marginTop: 5, color: '#211f35', fontSize: 16, fontWeight: '800' },

@@ -8,6 +8,45 @@ permissions:
   contents: read
 
 jobs:
+  mobile-react-native:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-react-native-prototype
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile-react-native-prototype/package-lock.json
+      - name: Install React Native dependencies
+        run: npm ci
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Run React Native tests
+        run: npm test
+
+  flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Flutter app
+        run: flutter analyze
+      - name: Run Flutter tests
+        run: flutter test
+      - name: Build Android debug APK
+        run: flutter build apk --debug
+
   backend:
     runs-on: ubuntu-latest
     services:

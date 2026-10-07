@@ -39,6 +39,7 @@ export type InvestmentPosition = {
   current_value?: number | null;
   pnl?: number | null;
   pnl_percent?: number | null;
+  allocation_percent?: number | null;
 };
 
 export type Portfolio = {
@@ -46,6 +47,10 @@ export type Portfolio = {
   current_total?: number | null;
   pnl_total?: number | null;
   position_count: number;
+  total_currency?: string | null;
+  mixed_currency?: boolean;
+  currency_totals?: Array<{ currency: string; invested_total: number; current_total: number; pnl_total: number; pnl_percent?: number | null; position_count: number }>;
+  allocations?: Array<{ market: 'br' | 'global'; label: string; currency: string; value: number; percentage: number }>;
   positions: InvestmentPosition[];
 };
 
@@ -195,6 +200,14 @@ export class TalentumApi {
     return this.request<Portfolio>('/clients/' + clientId + '/investment-portfolio');
   }
 
+  async investmentMonthlyPerformance(clientId: number) {
+    return this.request<JsonMap>('/clients/' + clientId + '/investment-monthly-performance');
+  }
+
+  async investmentTransactions(clientId: number) {
+    return this.request<JsonMap[]>('/clients/' + clientId + '/investment-transactions?limit=100');
+  }
+
   async documents(clientId: number) {
     return this.request<DocumentItem[]>('/clients/' + clientId + '/documents');
   }
@@ -203,17 +216,23 @@ export class TalentumApi {
     const filename = originalName.replace(/[^a-zA-Z0-9._-]/g, '_') || `documento-${documentId}`;
     const destination = (FileSystem.cacheDirectory || FileSystem.documentDirectory || '') + filename;
     if (!destination) throw new ApiError('O armazenamento temporário não está disponível.');
-    return this.downloadDocumentAttempt(clientId, documentId, destination, true);
+    return this.downloadFileAttempt(`/clients/${clientId}/documents/${documentId}/download`, destination, true);
   }
 
-  private async downloadDocumentAttempt(clientId: number, documentId: number, destination: string, retryOnUnauthorized: boolean): Promise<string> {
+  async downloadInvestmentReport(clientId: number) {
+    const destination = (FileSystem.cacheDirectory || FileSystem.documentDirectory || '') + `relatorio-carteira-talentum-${clientId}.pdf`;
+    if (!destination) throw new ApiError('O armazenamento temporário não está disponível.');
+    return this.downloadFileAttempt(`/clients/${clientId}/investment-report.pdf`, destination, true);
+  }
+
+  private async downloadFileAttempt(path: string, destination: string, retryOnUnauthorized: boolean): Promise<string> {
     const version = this.sessionVersion;
     const sentAccessToken = this.accessToken;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     let response: Response;
     try {
-      response = await fetch(`${API_URL}/clients/${clientId}/documents/${documentId}/download`, {
+      response = await fetch(`${API_URL}${path}`, {
         signal: controller.signal,
         headers: { Authorization: `Bearer ${sentAccessToken || ''}` },
       });
@@ -225,7 +244,7 @@ export class TalentumApi {
       if (retryOnUnauthorized && this.refreshToken) {
         if (sentAccessToken === this.accessToken) await this.refresh();
         this.checkSession(version);
-        return this.downloadDocumentAttempt(clientId, documentId, destination, false);
+        return this.downloadFileAttempt(path, destination, false);
       }
       await this.expireSession();
     }
