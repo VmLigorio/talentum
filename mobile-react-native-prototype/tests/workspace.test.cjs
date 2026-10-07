@@ -8,6 +8,8 @@ function setup() {
     if (['notifications', 'documents', 'patrimony', 'goals', 'actionPlan', 'reports', 'marketAlerts'].includes(key)) return [{ id: 1 }];
     return { id: 1 };
   }]));
+  // O nome usado pelo workspace difere do método público da API.
+  mockApi.investmentMonthlyPerformance = (...args) => mockApi.monthlyPerformance(...args);
   return { ...context, mockApi };
 }
 
@@ -43,7 +45,8 @@ test('permissão negada é distinta de indisponibilidade e não bloqueia o app',
 test('401 em qualquer módulo interrompe o acesso, incluindo módulos opcionais', async () => {
   const { mockApi, ApiError, fetchWorkspace, emptyWorkspace } = setup();
   for (const key of Object.keys(emptyWorkspace)) {
-    const failing = { ...mockApi, [key]: async () => { throw new ApiError('Expirada', 401); } };
+    const method = key === 'monthlyPerformance' ? 'investmentMonthlyPerformance' : key;
+    const failing = { ...mockApi, [method]: async () => { throw new ApiError('Expirada', 401); } };
     await assert.rejects(fetchWorkspace(failing, 1), (error) => error.status === 401);
   }
 });
