@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0012_create_investment_positions.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create investment positions
 
 Revision ID: 0012_create_investment_positions

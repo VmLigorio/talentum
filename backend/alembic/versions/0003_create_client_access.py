@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0003_create_client_access.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create client profiles permissions and audit logs
 
 Revision ID: 0003_create_client_access

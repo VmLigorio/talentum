@@ -87,6 +87,7 @@ Endpoints iniciais:
 - `GET/POST /market/watchlist` — consulta ou adiciona ativos à lista de acompanhamento de um cliente.
 - `DELETE /market/watchlist/{item_id}` — remove um ativo da lista de acompanhamento.
 - `GET /clients/{id}/investment-portfolio` — consolida posições, cotações, resultado e alocação do cliente.
+- `GET/POST /clients/{id}/investment-transactions` — consulta ou registra compras e vendas; o registro atualiza o saldo e o custo médio, incluindo taxas e resultado realizado de vendas.
 - `POST /clients/{id}/investment-positions` — cadastra uma posição de investimento.
 - `PATCH/DELETE /clients/{id}/investment-positions/{position_id}` — altera ou remove uma posição.
 - `GET /clients/{id}/investment-analytics?period=1y` — calcula retorno histórico, contribuição, benchmarks e alertas de leitura.
@@ -116,6 +117,8 @@ docker compose up -d postgres
 cd backend
 alembic upgrade head
 ```
+
+Ao executar a API diretamente no host, use o `.env.example` do backend: o Compose publica o PostgreSQL na porta `5433` do host. Dentro do Compose, a API usa o nome do serviço `postgres` e a porta interna `5432`.
 
 Para subir PostgreSQL e a API juntos pelo Docker Compose:
 
@@ -190,6 +193,8 @@ cache curto, retry de transporte, observabilidade segura por request ID e crité
 cd backend
 pytest
 ```
+
+Os testes de integração de autorização usam PostgreSQL e exigem `TEST_DATABASE_URL` apontando para um banco descartável cujo nome termine em `_test` ou `_testing`. Nunca aponte essa variável para o banco de desenvolvimento ou produção. A CI sobe um PostgreSQL temporário e aplica as migrations antes dos testes; sem essa variável, os testes de integração são pulados.
 
 ## Status do MVP
 

@@ -1,3 +1,6 @@
+# Talentum — backend/app/services/notifications.py
+# Responsabilidade: Concentra regras de negócio e integrações reutilizáveis, mantendo as rotas mais simples.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select

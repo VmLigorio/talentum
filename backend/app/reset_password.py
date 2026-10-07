@@ -1,3 +1,6 @@
+# Talentum — backend/app/reset_password.py
+# Responsabilidade: Contém código de suporte do projeto Talentum.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import argparse
 from datetime import datetime, timezone
 from getpass import getpass

@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0008_create_notifications.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create notifications
 
 Revision ID: 0008_create_notifications

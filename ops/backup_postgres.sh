@@ -1,3 +1,6 @@
+# Talentum — ops/backup_postgres.sh
+# Responsabilidade: Automatiza uma rotina operacional de backup, restauração ou verificação do ambiente.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -27,7 +30,7 @@ docker exec \
 docker exec -i \
   -e "PGPASSWORD=$POSTGRES_PASSWORD" \
   "$container_name" \
-  pg_restore --list - < "$temporary_file" > /dev/null
+  pg_restore --list < "$temporary_file" > /dev/null
 
 mv -- "$temporary_file" "$backup_file"
 sha256sum "$backup_file" > "$backup_file.sha256"

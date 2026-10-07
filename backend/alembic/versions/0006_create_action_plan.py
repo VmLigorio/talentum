@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0006_create_action_plan.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create client action plan
 
 Revision ID: 0006_create_action_plan

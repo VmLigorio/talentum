@@ -1,3 +1,6 @@
+// Talentum — mobile/lib/api_client.dart
+// Responsabilidade: Implementa o cliente HTTP usado pelo aplicativo Flutter para falar com a API.
+// Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -5,12 +8,14 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Abstração permite trocar o armazenamento seguro por um fake nos testes.
 abstract interface class SecureValueStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);
   Future<void> delete(String key);
 }
 
+// Implementação usada no dispositivo, apoiada pelo armazenamento criptografado.
 class PlatformSecureValueStore implements SecureValueStore {
   PlatformSecureValueStore([FlutterSecureStorage? storage])
       : storage = storage ?? const FlutterSecureStorage();
@@ -28,6 +33,7 @@ class PlatformSecureValueStore implements SecureValueStore {
   Future<void> delete(String key) => storage.delete(key: key);
 }
 
+// Armazenamento em memória para testes sem tocar nas credenciais reais do usuário.
 class MemorySecureValueStore implements SecureValueStore {
   final Map<String, String> values = {};
 
@@ -41,6 +47,7 @@ class MemorySecureValueStore implements SecureValueStore {
   Future<void> delete(String key) async => values.remove(key);
 }
 
+// Erro normalizado para que a interface mostre mensagens consistentes.
 class ApiException implements Exception {
   ApiException(this.message, this.statusCode);
 
@@ -51,6 +58,7 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+// Encapsula autenticação, renovação de tokens e todas as chamadas HTTP do app.
 class ApiClient {
   ApiClient(
       {required String baseUrl,
@@ -70,16 +78,19 @@ class ApiClient {
   static const accessTokenKey = 'talentum_access_token';
   static const refreshTokenKey = 'talentum_refresh_token';
 
+  // Recupera os tokens persistidos antes de a primeira tela ser apresentada.
   Future<void> restoreSession() async {
     accessToken = await secureStorage.read(accessTokenKey);
     refreshToken = await secureStorage.read(refreshTokenKey);
   }
 
+  // Mantém a sessão somente no armazenamento seguro, nunca em texto de interface.
   Future<void> _persistTokens() async {
     await secureStorage.write(accessTokenKey, accessToken!);
     await secureStorage.write(refreshTokenKey, refreshToken!);
   }
 
+  // Remove os tokens locais quando o logout ou a renovação falha.
   Future<void> clearSession() async {
     accessToken = null;
     refreshToken = null;
@@ -87,6 +98,7 @@ class ApiClient {
     await secureStorage.delete(refreshTokenKey);
   }
 
+  // Converte respostas JSON e transforma conteúdo inválido em erro de API.
   dynamic _decodeJson(String text) {
     if (text.trim().isEmpty) return null;
     try {
@@ -96,6 +108,7 @@ class ApiClient {
     }
   }
 
+  // Centraliza timeout, autenticação, tratamento de status e retry após 401.
   Future<dynamic> _request(
     String path, {
     String method = 'GET',
@@ -154,6 +167,7 @@ class ApiClient {
     }
   }
 
+  // Faz login e salva os tokens emitidos pela API.
   Future<void> login(String email, String password) async {
     final data = await _request(
       '/auth/login',
@@ -165,6 +179,7 @@ class ApiClient {
     await _persistTokens();
   }
 
+  // Evita várias renovações simultâneas quando requisições expiram juntas.
   Future<void> _refresh() async {
     final activeRefresh = _refreshCompleter;
     if (activeRefresh != null) return activeRefresh.future;
@@ -182,10 +197,12 @@ class ApiClient {
     }
   }
 
+  // A renovação usa o refresh token atual e substitui os dois tokens locais.
   Future<void> _performRefresh() async {
     final currentRefreshToken = refreshToken;
-    if (currentRefreshToken == null)
+    if (currentRefreshToken == null) {
       throw ApiException('Sessão expirada.', 401);
+    }
     final data = await _request(
       '/auth/refresh',
       method: 'POST',
@@ -197,6 +214,7 @@ class ApiClient {
     await _persistTokens();
   }
 
+  // Métodos seguintes representam os recursos públicos consumidos pelo mobile.
   Future<Map<String, dynamic>> me() async =>
       Map<String, dynamic>.from(await _request('/auth/me') as Map);
 
@@ -207,6 +225,14 @@ class ApiClient {
   Future<Map<String, dynamic>> investmentPortfolio(int clientId) async =>
       Map<String, dynamic>.from(
           await _request('/clients/$clientId/investment-portfolio') as Map);
+
+  Future<Map<String, dynamic>> investmentMonthlyPerformance(int clientId) async =>
+      Map<String, dynamic>.from(await _request(
+          '/clients/$clientId/investment-monthly-performance') as Map);
+
+  Future<List<dynamic>> investmentTransactions(int clientId) async =>
+      List<dynamic>.from(await _request(
+          '/clients/$clientId/investment-transactions?limit=100') as List);
 
   Future<List<dynamic>> patrimony(int clientId) async => List<dynamic>.from(
       await _request('/clients/$clientId/patrimony') as List);
@@ -227,6 +253,7 @@ class ApiClient {
       List<dynamic>.from(
           await _request('/notifications?unread_only=$unreadOnly') as List);
 
+  // Alertas de preço usam o mesmo mecanismo de autenticação e renovação.
   Future<List<dynamic>> marketAlerts() async =>
       List<dynamic>.from(await _request('/market/alerts') as List);
 
@@ -282,6 +309,7 @@ class ApiClient {
       Map<String, dynamic>.from(await _request('/notifications/preferences',
           method: 'PATCH', body: body) as Map);
 
+  // Upload multipart é tratado separadamente porque não envia JSON.
   Future<void> uploadDocument(
     int clientId, {
     required String path,
@@ -358,6 +386,7 @@ class ApiClient {
     }
   }
 
+  // Download retorna bytes para o visualizador ou para o armazenamento local.
   Future<List<int>> downloadDocument(
     int clientId,
     int documentId, {
@@ -409,6 +438,53 @@ class ApiClient {
     }
   }
 
+  Future<List<int>> downloadInvestmentReport(int clientId,
+      {bool retryOnUnauthorized = true}) async {
+    final client = HttpClient();
+    try {
+      client.connectionTimeout = const Duration(seconds: 12);
+      final request = await client.getUrl(
+          Uri.parse('$baseUrl/clients/$clientId/investment-report.pdf'));
+      if (accessToken != null) {
+        request.headers
+            .set(HttpHeaders.authorizationHeader, 'Bearer $accessToken');
+      }
+      final response = await request.close().timeout(const Duration(seconds: 60));
+      final bytes = await response.fold<List<int>>(<int>[], (all, chunk) {
+        all.addAll(chunk);
+        return all;
+      });
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 &&
+            retryOnUnauthorized &&
+            refreshToken != null) {
+          try {
+            await _refresh();
+            return await downloadInvestmentReport(clientId,
+                retryOnUnauthorized: false);
+          } catch (_) {
+            await clearSession();
+          }
+        }
+        final data = _decodeJson(utf8.decode(bytes));
+        final detail = data is Map && data['detail'] is String
+            ? data['detail'] as String
+            : 'Não foi possível emitir o relatório da carteira.';
+        throw ApiException(detail, response.statusCode);
+      }
+      return bytes;
+    } on SocketException {
+      throw ApiException('Não foi possível conectar à API.', 0);
+    } on HttpException {
+      throw ApiException('A API não respondeu corretamente.', 0);
+    } on TimeoutException {
+      throw ApiException('A emissão demorou demais para responder.', 0);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  // Perfil, permissões e dados financeiros são separados para respeitar seus acessos.
   Future<Map<String, dynamic>?> financialProfile(int clientId) async {
     try {
       return Map<String, dynamic>.from(
@@ -419,6 +495,49 @@ class ApiClient {
       rethrow;
     }
   }
+
+  // Questionário e avaliação de suitability alimentam a carteira modelo do cliente.
+  Future<Map<String, dynamic>> suitabilityQuestionnaire() async =>
+      Map<String, dynamic>.from(
+          await _request('/clients/me/suitability/questionnaire') as Map);
+
+  Future<Map<String, dynamic>?> suitability() async {
+    try {
+      final data = await _request('/clients/me/suitability');
+      return data == null ? null : Map<String, dynamic>.from(data as Map);
+    } on ApiException catch (exception) {
+      if (exception.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> submitSuitability({
+    required String objective,
+    required Map<String, String> answers,
+    required String financialDataVersion,
+    required bool confirmFinancialSituation,
+  }) async =>
+      Map<String, dynamic>.from(await _request(
+        '/clients/me/suitability',
+        method: 'POST',
+        body: {
+          'objective': objective,
+          'answers': answers,
+          'financial_data_version': financialDataVersion,
+          'confirm_financial_situation': confirmFinancialSituation,
+        },
+      ) as Map);
+
+  Future<Map<String, dynamic>> respondToSuitability({
+    required int assessmentId,
+    required String response,
+    String? note,
+  }) async =>
+      Map<String, dynamic>.from(await _request(
+        '/clients/me/suitability/$assessmentId/response',
+        method: 'POST',
+        body: {'response': response, 'note': note},
+      ) as Map);
 
   Future<Map<String, dynamic>> profile(int clientId) async =>
       Map<String, dynamic>.from(
@@ -477,6 +596,7 @@ class ApiClient {
     await _request('/clients/$clientId/goals/$goalId', method: 'DELETE');
   }
 
+  // Logout tenta invalidar a sessão no servidor e sempre limpa a sessão local.
   Future<void> logout() async {
     if (accessToken == null) {
       await clearSession();

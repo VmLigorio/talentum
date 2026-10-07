@@ -1,0 +1,29 @@
+{
+  "name": "talentum-mobile-react-native-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "dependencies": {
+    "expo": "^52.0.0",
+    "expo-asset": "~11.0.5",
+    "expo-file-system": "~18.0.12",
+    "expo-local-authentication": "~15.0.2",
+    "expo-secure-store": "~14.0.0",
+    "expo-sharing": "~13.0.1",
+    "react": "18.3.1",
+    "react-native": "0.76.9",
+    "react-native-svg": "15.8.0"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.12",
+    "typescript": "~5.7.3"
+  }
+}

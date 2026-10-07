@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0004_create_financial_core.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create financial profile patrimony items and goals
 
 Revision ID: 0004_create_financial_core

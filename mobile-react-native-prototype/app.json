@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Talentum Prototype",
+    "slug": "talentum-mobile-react-native-prototype",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "scheme": "talentum-prototype",
+    "android": {
+      "package": "com.talentum.mobileprototype",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FAF9F6"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.talentum.mobileprototype"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-local-authentication"
+    ]
+  }
+}

@@ -1,3 +1,6 @@
+# Talentum — backend/app/core/rate_limit.py
+# Responsabilidade: Centraliza configuração, autenticação, autorização e controles transversais da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from collections import defaultdict, deque
 import hashlib
 import time

@@ -1,3 +1,6 @@
+# Talentum — backend/app/seed.py
+# Responsabilidade: Cria dados iniciais de desenvolvimento de forma repetível.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import argparse
 from getpass import getpass
 

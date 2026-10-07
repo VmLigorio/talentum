@@ -1,4 +1,8 @@
+# Talentum — backend/app/schemas/market_alert.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,11 +34,11 @@ class MarketAlertCreate(BaseModel):
     client_id: int | None = Field(default=None, ge=1)
     symbol: str = Field(min_length=1, max_length=32)
     market: Literal["br", "global"]
-    target_price: float = Field(gt=0)
+    target_price: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     condition: MarketAlertCondition = "at_or_below"
 
 
 class MarketAlertUpdate(BaseModel):
-    target_price: float | None = Field(default=None, gt=0)
+    target_price: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     condition: MarketAlertCondition | None = None
     status: MarketAlertStatus | None = None

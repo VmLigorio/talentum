@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0002_create_sessions.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create sessions table
 
 Revision ID: 0002_create_sessions

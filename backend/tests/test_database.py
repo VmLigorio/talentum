@@ -1,3 +1,6 @@
+# Talentum — backend/tests/test_database.py
+# Responsabilidade: Contém testes automatizados que protegem o comportamento esperado do sistema.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from app.db.database import Base
 from app.models import User
 
@@ -53,6 +56,7 @@ def test_market_watchlist_model_is_registered_in_metadata() -> None:
 
 def test_investment_position_model_is_registered_in_metadata() -> None:
     assert "investment_positions" in Base.metadata.tables
+    assert "name" in Base.metadata.tables["investment_positions"].c
 
 
 def test_portfolio_snapshot_model_is_registered_in_metadata() -> None:

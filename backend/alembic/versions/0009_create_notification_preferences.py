@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0009_create_notification_preferences.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create notification preferences
 
 Revision ID: 0009_notification_prefs

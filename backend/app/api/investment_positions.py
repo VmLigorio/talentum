@@ -1,3 +1,6 @@
+# Talentum — backend/app/api/investment_positions.py
+# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from decimal import Decimal, ROUND_HALF_UP
 
 import httpx
@@ -7,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.db.database import get_db
-from app.models import AuditLog, InvestmentPosition, User
+from app.models import AuditLog, InvestmentPosition, InvestmentTransaction, User
 from app.schemas.investment_position import (
     InvestmentAllocation,
     InvestmentCurrencyTotal,
@@ -46,7 +49,7 @@ def _audit(db: Session, actor: User, client_id: int, action: str, item_id: int |
 def _quote(item: InvestmentPosition, service: MarketDataService) -> tuple[str | None, Decimal | None, str | None, str | None]:
     try:
         instrument = service.details(item.symbol, item.market)
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
         return None, None, None, None
     price = Decimal(str(instrument.price)) if instrument.price is not None else None
     return instrument.name, price, instrument.currency, instrument.source
@@ -59,7 +62,8 @@ def _position_response(
     quote: tuple[str | None, Decimal | None, str | None, str | None] | None = None,
 ) -> InvestmentPositionResponse:
     invested = item.quantity * item.average_price
-    name, current_price, currency, source = quote or _quote(item, service)
+    quoted_name, current_price, currency, source = quote or _quote(item, service)
+    name = item.name or quoted_name
     currency = currency or ("BRL" if item.market == "br" else "USD")
     current_value = item.quantity * current_price if current_price is not None else None
     pnl = current_value - invested if current_value is not None else None
@@ -186,9 +190,20 @@ def create_investment_position(
 ) -> InvestmentPositionResponse:
     _find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
+    symbol = payload.symbol.strip().upper()
+    duplicate = db.scalar(
+        select(InvestmentPosition.id).where(
+            InvestmentPosition.client_id == client_id,
+            InvestmentPosition.market == payload.market,
+            InvestmentPosition.symbol == symbol,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Este ativo já tem uma posição cadastrada. Registre uma compra ou venda no histórico de operações.")
     item = InvestmentPosition(
         client_id=client_id,
-        symbol=payload.symbol.strip().upper(),
+        symbol=symbol,
+        name=payload.name.strip() if payload.name and payload.name.strip() else None,
         market=payload.market,
         quantity=payload.quantity,
         average_price=payload.average_price,
@@ -221,7 +236,31 @@ def update_investment_position(
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    has_transactions = db.scalar(
+        select(InvestmentTransaction.id)
+        .where(InvestmentTransaction.position_id == item.id)
+        .limit(1)
+    ) is not None
+    if has_transactions and {"symbol", "market", "quantity", "average_price"}.intersection(updates):
+        raise HTTPException(
+            status_code=409,
+            detail="Esta posição já tem operações registradas. Altere o saldo registrando uma compra ou venda.",
+        )
+    if "symbol" in updates and isinstance(updates["symbol"], str):
+        updates["symbol"] = updates["symbol"].strip().upper()
+    if "symbol" in updates or "market" in updates:
+        duplicate = db.scalar(
+            select(InvestmentPosition.id).where(
+                InvestmentPosition.client_id == client_id,
+                InvestmentPosition.id != item.id,
+                InvestmentPosition.market == updates.get("market", item.market),
+                InvestmentPosition.symbol == updates.get("symbol", item.symbol),
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="Este ativo já tem outra posição cadastrada.")
+    for field, value in updates.items():
         setattr(item, field, value.strip() if isinstance(value, str) and value.strip() else (None if isinstance(value, str) else value))
     _audit(db, current_user, client_id, "update", item.id)
     db.commit()
@@ -246,6 +285,16 @@ def delete_investment_position(
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
+    has_transactions = db.scalar(
+        select(InvestmentTransaction.id)
+        .where(InvestmentTransaction.position_id == item.id)
+        .limit(1)
+    ) is not None
+    if has_transactions:
+        raise HTTPException(
+            status_code=409,
+            detail="Esta posição tem operações no histórico. Registre uma venda para encerrar o saldo.",
+        )
     _audit(db, current_user, client_id, "delete", item.id)
     db.delete(item)
     db.commit()

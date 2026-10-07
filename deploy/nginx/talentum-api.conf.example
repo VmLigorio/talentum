@@ -1,3 +1,6 @@
+# Talentum — deploy/nginx/talentum-api.conf.example
+# Responsabilidade: Fornece uma configuração de implantação que deve ser adaptada ao ambiente real.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 # Exemplo de proxy HTTPS. Instale os certificados fora do repositório.
 # Substitua api.seudominio.com e os caminhos dos certificados antes de ativar.
 # O Compose de produção publica a API somente em 127.0.0.1:8100 por padrão.

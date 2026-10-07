@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0015_document_review_alerts.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """add annual document review notification preference
 
 Revision ID: 0015_document_review_alerts

@@ -1,5 +1,9 @@
+// Talentum — advisor/app.js
+// Responsabilidade: Controla o estado do painel Advisor, chamadas à API, renderização e interações da tela.
+// Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 const API = new URLSearchParams(window.location.search).get("api") || "http://127.0.0.1:8001";
-const state = { token: sessionStorage.getItem("talentum_advisor_token"), refreshToken: sessionStorage.getItem("talentum_advisor_refresh_token"), clients: [], advisors: [], team: [], notifications: [], notificationPreferences: null, notificationTypeFilter: "all", notificationReadFilter: "all", userRole: null, selected: null, permissions: null, financialProfile: null, clientProfile: null, editingReport: null, reports: [], documents: [], patrimony: [], goals: [], actionPlan: [], editingPatrimony: null, editingGoal: null, editingAction: null, investmentPortfolio: null, editingInvestmentPosition: null, investmentAnalytics: null, investmentSnapshots: [], marketResults: [], marketTypeFilter: "all", marketSectorFilter: "all", marketSort: "relevance", marketCompareKeys: [], marketComparisonHistories: [], marketComparisonPeriod: "1y", marketAlerts: [], editingMarketAlert: null, marketWatchlist: [] };
+// Estado global da sessão e dos painéis; os dados são atualizados após cada operação.
+const state = { token: sessionStorage.getItem("talentum_advisor_token"), refreshToken: sessionStorage.getItem("talentum_advisor_refresh_token"), clients: [], advisors: [], team: [], notifications: [], notificationPreferences: null, notificationTypeFilter: "all", notificationReadFilter: "all", userRole: null, selected: null, permissions: null, financialProfile: null, clientProfile: null, suitability: null, suitabilityProposalDraft: null, suitabilityProposalSearchResults: [], suitabilityProposalQuery: "", suitabilityProposalMarket: "all", editingReport: null, reports: [], documents: [], patrimony: [], goals: [], actionPlan: [], editingPatrimony: null, editingGoal: null, editingAction: null, investmentPortfolio: null, investmentTransactions: [], editingInvestmentPosition: null, investmentAnalytics: null, investmentSnapshots: [], investmentMonthlyPerformance: null, marketResults: [], marketTypeFilter: "all", marketSectorFilter: "all", marketSort: "relevance", marketCompareKeys: [], marketComparisonHistories: [], marketComparisonPeriod: "1y", marketAlerts: [], editingMarketAlert: null, marketWatchlist: [] };
 const $ = (id) => document.getElementById(id);
 const money = (value) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[character]));
@@ -20,6 +24,7 @@ const formatApiError = (data, status) => {
 const formatDate = (value) => value ? new Intl.DateTimeFormat("pt-BR").format(new Date(`${value}T12:00:00`)) : "";
 const isOverdue = (date, status) => Boolean(date && status !== "completed" && new Date(`${date}T23:59:59`) < new Date());
 const isGoalOverdue = (date, status) => isOverdue(date, status);
+// Cliente HTTP: injeta o token, interpreta erros e renova a sessão quando necessário.
 const api = async (path, options = {}, retryOnUnauthorized = true) => {
   let response;
   const { responseType, ...requestOptions } = options;
@@ -51,6 +56,7 @@ const api = async (path, options = {}, retryOnUnauthorized = true) => {
 const show = (id, visible) => $(id).classList.toggle("hidden", !visible);
 const setFeedback = (id, message, error = false) => { $(id).textContent = message; $(id).style.color = error ? "#b84a5c" : ""; };
 
+// Mostra imediatamente ao usuário se a API configurada está pronta.
 async function checkApiHealth() {
   const status = $("api-status");
   try {
@@ -64,6 +70,7 @@ async function checkApiHealth() {
   }
 }
 
+// Autentica o Advisor/administrador e carrega o workspace após o login.
 async function login(event) {
   event.preventDefault();
   $("login-error").textContent = "";
@@ -75,6 +82,7 @@ async function login(event) {
   } catch (error) { $("login-error").textContent = error.message; }
 }
 
+// Monta o estado inicial de acordo com a role e habilita os módulos permitidos.
 async function start() {
   try {
     const user = await api("/auth/me");
@@ -100,6 +108,7 @@ async function start() {
   }
 }
 
+// Renderiza a lista filtrável de clientes e destaca o cliente selecionado.
 function renderClients() {
   $("client-list").innerHTML = "";
   const query = $("client-search").value.trim().toLowerCase();
@@ -119,6 +128,7 @@ function renderOverview() {
   $("overview-advisor-count").textContent = state.userRole === "admin" ? state.advisors.length : "—";
 }
 
+// Renderiza notificações aplicando filtros por tipo e status de leitura.
 function renderNotifications() {
   const unread = state.notifications.filter((notification) => !notification.read_at);
   const visible = state.notifications.filter((notification) => {
@@ -137,6 +147,7 @@ function renderNotificationPreferences() {
   document.querySelectorAll("[data-notification-preference]").forEach((input) => { input.checked = Boolean(state.notificationPreferences[input.dataset.notificationPreference]); });
 }
 
+// Persiste no backend as preferências que controlam os avisos do usuário.
 async function saveNotificationPreferences() {
   const payload = Object.fromEntries([...document.querySelectorAll("[data-notification-preference]")].map((input) => [input.dataset.notificationPreference, input.checked]));
   try {
@@ -166,6 +177,7 @@ function closeNotificationsDialog() {
   $("notifications-dialog").close();
 }
 
+// Marca uma notificação individual sem recarregar o restante do workspace.
 async function markNotificationRead(notificationId) {
   try {
     await api(`/notifications/${notificationId}/read`, { method: "PATCH" });
@@ -191,6 +203,7 @@ async function markAllNotificationsRead() {
   } catch (error) { window.alert(error.message); }
 }
 
+// Formatadores de mercado evitam que valores nulos ou moedas inválidas quebrem a tela.
 function marketNumber(value) {
   return value === null || value === undefined || Number.isNaN(Number(value)) ? "—" : new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(Number(value));
 }
@@ -216,6 +229,7 @@ function marketDetailValue(value, formatter = marketNumber) {
   return value === null || value === undefined || value === "" ? "—" : formatter(value);
 }
 
+// Desenha o histórico em SVG, incluindo escala lateral, retorno e benchmark.
 function renderMarketHistory(panel, data) {
   const points = (data.points || []).filter((point) => point.return_percent !== null && point.return_percent !== undefined);
   const benchmark = (data.benchmark_points || []).filter((point) => point.return_percent !== null && point.return_percent !== undefined);
@@ -238,6 +252,7 @@ function renderMarketHistory(panel, data) {
   panel.innerHTML = `<div class="market-history-metrics"><div><small class="muted">Volatilidade anualizada</small><strong>${marketDetailValue(data.annualized_volatility, (value) => `${marketNumber(value)}%`)}</strong><span>${volatilityBand}</span></div><div><small class="muted">Maior queda no período</small><strong>${marketDetailValue(data.max_drawdown, (value) => `${marketNumber(value)}%`)}</strong><span>do topo ao vale</span></div><div><small class="muted">Volume médio</small><strong>${marketNumber(data.average_volume)}</strong><span>${marketNumber(data.observation_count)} observações</span></div></div><div class="market-chart-summary"><span>Retorno de ${formatDateTime(points[0].date)} a ${formatDateTime(last.date)}: <strong>${formatReturn(last.return_percent)}</strong></span><span class="market-chart-legend"><i class="asset"></i>${escapeHtml(data.symbol)}${benchmarkLast ? `<i class="benchmark"></i>${escapeHtml(data.benchmark_symbol || "Referência")}` : ""}</span></div><div class="market-chart-wrap"><svg class="market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Histórico de retorno percentual">${grid}<line x1="${padX}" y1="${toY(0)}" x2="${width - 12}" y2="${toY(0)}" class="market-chart-zero"></line><polyline points="${line(points)}" class="market-chart-line asset"></polyline>${benchmarkLast ? `<polyline points="${line(benchmark)}" class="market-chart-line benchmark"></polyline>` : ""}</svg></div><div class="market-chart-footer"><span>${escapeHtml(formatDateTime(points[0].date))}</span><span>Retorno acumulado (%)</span><span>${escapeHtml(formatDateTime(last.date))}</span></div>`;
 }
 
+// Aplica filtros e ordenação local sobre os resultados já recebidos da API.
 function marketFilteredResults() {
   const filtered = state.marketResults.filter((item) => {
     const typeMatch = state.marketTypeFilter === "all" || String(item.asset_type || "").toLowerCase() === state.marketTypeFilter;
@@ -367,6 +382,7 @@ async function loadMarketWatchlist() {
   } catch (error) { state.marketWatchlist = []; $("market-watchlist-list").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`; }
 }
 
+// Inclui um ativo na lista de acompanhamento do cliente escolhido.
 async function createMarketWatchlistItem(event) {
   event.preventDefault();
   const clientId = Number($("market-watchlist-client").value);
@@ -406,6 +422,7 @@ function openMarketWatchlistItem(button) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// Cria ou atualiza um alerta de preço conforme o formulário selecionado.
 async function createMarketAlert(event) {
   event.preventDefault();
   const clientId = Number($("market-alert-client").value);
@@ -474,6 +491,7 @@ function renderMarketComparison(panel, histories) {
   panel.innerHTML = `<div class="market-chart-summary"><span>Retorno acumulado normalizado</span><span class="market-chart-legend-list">${legend}</span></div><div class="market-chart-wrap"><svg class="market-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Comparação histórica de ativos">${grid}<line x1="${padX}" y1="${toY(0)}" x2="${width - 12}" y2="${toY(0)}" class="market-chart-zero"></line>${lines}</svg></div><div class="market-comparison-ranking"><p class="eyebrow">resultado no período</p>${ranking}</div>`;
 }
 
+// Busca históricos de até três ativos e prepara a comparação visual.
 async function compareSelectedMarketAssets() {
   const selected = state.marketResults.filter((item) => state.marketCompareKeys.includes(marketKey(item))).slice(0, 3);
   if (selected.length < 2) return;
@@ -632,6 +650,7 @@ function openMarketResearch() {
   $("market-query").focus();
 }
 
+// Pesquisa ativos no Brasil ou no exterior e atualiza filtros/resultados.
 async function searchMarket(event) {
   event.preventDefault();
   const query = $("market-query").value.trim();
@@ -665,6 +684,7 @@ async function searchMarket(event) {
   }
 }
 
+// Recarrega os dados principais sem perder a tela atualmente selecionada.
 async function refreshWorkspace() {
   const button = $("refresh-workspace");
   const selectedId = state.selected?.id;
@@ -739,6 +759,7 @@ function resetSelectedClientPassword() {
   if (state.selected) resetUserPassword(state.selected.id, "cliente");
 }
 
+// Carrega todos os módulos do cliente para o painel de acompanhamento.
 async function selectClient(id) {
   show("market-view", false);
   show("empty-state", false);
@@ -751,13 +772,16 @@ async function selectClient(id) {
   state.selected = state.clients.find((client) => client.id === id);
   state.investmentAnalytics = null;
   state.investmentSnapshots = [];
+  state.investmentMonthlyPerformance = null;
   renderInvestmentAnalytics(null);
   renderInvestmentSnapshots([]);
+  renderInvestmentMonthlyPerformance(null);
+  setFeedback("investment-monthly-status", "Carregando rendimento e comparação com o CDI...");
   document.querySelectorAll(".client-button").forEach((button) => button.classList.toggle("active", Number(button.dataset.id) === id));
   show("empty-state", false); show("client-view", true); $("client-name").textContent = state.selected.name; $("client-email").textContent = state.selected.email; $("client-status").textContent = state.selected.is_active ? "Ativo" : "Inativo";
   try {
-    const [dashboard, permissions, reports, documents, financialProfile, clientProfile, audit, patrimony, goals, actionPlan, investmentPortfolio] = await Promise.all([api(`/clients/${id}/dashboard`), api(`/clients/${id}/permissions`), api(`/clients/${id}/reports`), api(`/clients/${id}/documents`), api(`/clients/${id}/financial-profile`).catch((error) => { if (error.status === 404) return null; throw error; }), api(`/clients/${id}/profile`), api(`/clients/${id}/audit-log`), api(`/clients/${id}/patrimony`), api(`/clients/${id}/goals`), api(`/clients/${id}/action-plan`), api(`/clients/${id}/investment-portfolio`)]);
-    state.permissions = permissions; state.financialProfile = financialProfile; state.clientProfile = clientProfile; state.reports = reports; state.documents = documents; state.patrimony = patrimony; state.goals = goals; state.actionPlan = actionPlan; state.investmentPortfolio = investmentPortfolio; renderDashboard(dashboard, reports); renderInvestmentPortfolio(investmentPortfolio); renderInvestmentHistoryCurrencies(investmentPortfolio); renderPermissions(permissions); renderFinancialProfile(financialProfile); renderReports(reports); renderDocuments(documents); renderClientProfile(clientProfile); renderAudit(audit); renderQuickRecords(); renderActionPlan(); refreshNotifications().catch(() => {});
+    const [dashboard, permissions, reports, documents, financialProfile, clientProfile, audit, patrimony, goals, actionPlan, investmentPortfolio, investmentTransactions, suitability] = await Promise.all([api(`/clients/${id}/dashboard`), api(`/clients/${id}/permissions`), api(`/clients/${id}/reports`), api(`/clients/${id}/documents`), api(`/clients/${id}/financial-profile`).catch((error) => { if (error.status === 404) return null; throw error; }), api(`/clients/${id}/profile`), api(`/clients/${id}/audit-log`), api(`/clients/${id}/patrimony`), api(`/clients/${id}/goals`), api(`/clients/${id}/action-plan`), api(`/clients/${id}/investment-portfolio`), api(`/clients/${id}/investment-transactions`), api(`/clients/${id}/suitability`).catch((error) => { if (error.status === 404) return null; throw error; })]);
+    state.permissions = permissions; state.financialProfile = financialProfile; state.clientProfile = clientProfile; state.suitability = suitability; state.reports = reports; state.documents = documents; state.patrimony = patrimony; state.goals = goals; state.actionPlan = actionPlan; state.investmentPortfolio = investmentPortfolio; state.investmentTransactions = investmentTransactions; state.investmentMonthlyPerformance = null; renderDashboard(dashboard, reports); renderInvestmentPortfolio(investmentPortfolio); renderInvestmentTransactions(investmentTransactions); renderInvestmentHistoryCurrencies(investmentPortfolio); renderPermissions(permissions); renderFinancialProfile(financialProfile); renderSuitability(suitability); renderReports(reports); renderDocuments(documents); renderClientProfile(clientProfile); renderAudit(audit); renderQuickRecords(); renderActionPlan(); loadInvestmentMonthlyPerformance(id).catch(() => {}); refreshNotifications().catch(() => {});
   } catch (error) { setFeedback("permission-status", error.message, true); }
 }
 
@@ -783,6 +807,7 @@ function portfolioPnl(position) {
   return (Number(position.pnl) >= 0 ? "+" : "") + value + " (" + Number(position.pnl_percent || 0).toFixed(2).replace(".", ",") + "%)";
 }
 
+// Exibe posições, valores, variação e distribuição da carteira do cliente.
 function renderInvestmentPortfolio(portfolio) {
   state.investmentPortfolio = portfolio;
   const mixedCurrency = portfolio.mixed_currency === true;
@@ -794,9 +819,110 @@ function renderInvestmentPortfolio(portfolio) {
   $("investment-currency-totals").innerHTML = (portfolio.currency_totals || []).map((item) => "<div class=\"investment-currency-total\"><strong>" + escapeHtml(item.currency) + "</strong><span>Investido: " + portfolioMoney(item.invested_total, item.currency) + " · Atualizado: " + portfolioMoney(item.current_total, item.currency) + " · Resultado: " + (Number(item.pnl_total) >= 0 ? "+" : "") + portfolioMoney(item.pnl_total, item.currency) + "</span></div>").join("");
   $("investment-allocations").innerHTML = portfolio.allocations?.length ? portfolio.allocations.map((item) => "<div class=\"investment-allocation\"><div class=\"row-top\"><span>" + escapeHtml(item.label) + "</span><strong>" + Number(item.percentage).toFixed(2).replace(".", ",") + "%</strong></div><div class=\"bar\"><i style=\"width:" + Math.min(100, Number(item.percentage)) + "%\"></i></div><small class=\"muted\">" + money(item.value) + "</small></div>").join("") : "";
   const positions = portfolio.positions || [];
-  $("investment-position-list").innerHTML = positions.length ? positions.map((item) => "<article class=\"investment-position-row\"><div><div class=\"investment-position-heading\"><strong>" + escapeHtml(item.symbol) + "</strong><span class=\"market-badge " + (item.market === "br" ? "br" : "global") + "\">" + (item.market === "br" ? "B3" : "Exterior") + "</span></div><small class=\"muted\">" + escapeHtml(item.name || "Ativo") + " · " + Number(item.quantity) + " cotas/ações · médio " + portfolioMoney(item.average_price, item.currency) + "</small><small class=\"muted\">" + (item.institution ? escapeHtml(item.institution) + " · " : "") + "Atual: " + portfolioValue(item) + " · " + portfolioPnl(item) + "</small>" + (item.notes ? "<small class=\"muted\">" + escapeHtml(item.notes) + "</small>" : "") + "</div><div class=\"quick-record-actions\"><button class=\"button ghost small\" type=\"button\" data-investment-edit=\"" + item.id + "\">Editar</button><button class=\"button ghost small\" type=\"button\" data-investment-delete=\"" + item.id + "\">Remover</button></div></article>").join("") : "<p class=\"empty-line\">Nenhuma posição de investimento cadastrada.</p>";
+  renderInvestmentAllocationChart(positions);
+  $("investment-position-list").innerHTML = positions.length ? positions.map((item) => {
+    const hasOperations = (state.investmentTransactions || []).some((transaction) => transaction.position_id === item.id);
+    return "<article class=\"investment-position-row\"><div><div class=\"investment-position-heading\"><strong>" + escapeHtml(item.symbol) + "</strong><span class=\"market-badge " + (item.market === "br" ? "br" : "global") + "\">" + (item.market === "br" ? "B3" : "Exterior") + "</span></div><small class=\"muted\">" + escapeHtml(item.name || "Ativo") + " · " + Number(item.quantity).toLocaleString("pt-BR", { maximumFractionDigits: 8 }) + " cotas · médio " + portfolioMoney(item.average_price, item.currency) + "</small><small class=\"muted\">" + (item.institution ? escapeHtml(item.institution) + " · " : "") + "Atual: " + portfolioValue(item) + " · " + portfolioPnl(item) + "</small>" + (item.notes ? "<small class=\"muted\">" + escapeHtml(item.notes) + "</small>" : "") + (hasOperations ? "<small class=\"muted\">Saldo controlado pelo histórico de operações.</small>" : "") + "</div>" + (hasOperations ? "" : "<div class=\"quick-record-actions\"><button class=\"button ghost small\" type=\"button\" data-investment-edit=\"" + item.id + "\">Editar</button><button class=\"button ghost small\" type=\"button\" data-investment-delete=\"" + item.id + "\">Remover</button></div>") + "</article>";
+  }).join("") : "<p class=\"empty-line\">Nenhuma posição de investimento cadastrada.</p>";
   document.querySelectorAll("[data-investment-edit]").forEach((button) => { button.onclick = () => startInvestmentPositionEdit(positions.find((item) => item.id === Number(button.dataset.investmentEdit))); });
   document.querySelectorAll("[data-investment-delete]").forEach((button) => { button.onclick = () => deleteInvestmentPosition(Number(button.dataset.investmentDelete)); });
+}
+
+// Mostra a composição por ativo, mantendo cada moeda em seu próprio gráfico.
+function renderInvestmentAllocationChart(positions) {
+  const container = $("investment-allocation-chart");
+  const palette = ["#6c5ce7", "#14a89a", "#f0a23b", "#dd6681", "#4384d8", "#9b6bd3", "#55a66e", "#d07842", "#4c9eaa", "#967d55"];
+  const currencies = new Map();
+  (positions || []).forEach((position) => {
+    const value = Number(position.current_value);
+    if (!Number.isFinite(value) || value <= 0) return;
+    const currency = position.currency || (position.market === "br" ? "BRL" : "USD");
+    if (!currencies.has(currency)) currencies.set(currency, []);
+    currencies.get(currency).push({ ...position, chartValue: value });
+  });
+  if (!currencies.size) {
+    container.innerHTML = '<p class="empty-line">Nenhuma posição com cotação disponível para o gráfico.</p>';
+    return;
+  }
+  container.innerHTML = Array.from(currencies.entries()).map(([currency, items]) => {
+    const total = items.reduce((sum, item) => sum + item.chartValue, 0);
+    let angle = 0;
+    const slices = items.map((item, index) => {
+      const start = angle;
+      angle += item.chartValue / total * 100;
+      return { item, index, start, end: angle, percent: item.chartValue / total * 100 };
+    });
+    const gradient = slices.map((slice) => `${palette[slice.index % palette.length]} ${slice.start.toFixed(3)}% ${slice.end.toFixed(3)}%`).join(", ");
+    const legend = slices.map(({ item, index }) => `<div class="investment-donut-entry"><button class="investment-donut-legend-row" type="button" aria-expanded="false"><i style="--legend-color:${palette[index % palette.length]}"></i><span><strong>${escapeHtml(item.symbol)}</strong></span><b>${portfolioMoney(item.chartValue, currency)}</b></button><small class="investment-donut-full-name hidden">${escapeHtml(item.name || "Nome do ativo não informado")}</small></div>`).join("");
+    return `<article class="investment-donut-group"><div class="investment-donut" style="--donut:conic-gradient(${gradient})" role="img" aria-label="Composição da carteira em ${escapeHtml(currency)}"><span><small>${escapeHtml(currency)}</small><strong>${portfolioMoney(total, currency)}</strong></span></div><div class="investment-donut-legend">${legend}</div></article>`;
+  }).join("");
+  container.querySelectorAll(".investment-donut-legend-row").forEach((button) => {
+    button.addEventListener("click", () => {
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      button.setAttribute("aria-expanded", String(!expanded));
+      button.nextElementSibling.classList.toggle("hidden", expanded);
+    });
+  });
+}
+
+function renderInvestmentMonthlyPerformance(performance) {
+  state.investmentMonthlyPerformance = performance;
+  const chart = $("investment-monthly-chart");
+  if (!performance?.currencies?.length) {
+    chart.innerHTML = '<p class="empty-line">Ainda não há dados de rendimento para este mês.</p>';
+    return;
+  }
+  const groups = performance.currencies.map((item) => {
+    if (!item.data_available || !item.points?.length) {
+      return `<article class="investment-monthly-currency"><h4>${escapeHtml(item.currency)}</h4><p class="muted">Dados insuficientes para calcular o rendimento. ${item.source_status === "partial" ? "Há posições sem cotação ou snapshots incompletos." : "Registre snapshots em dias diferentes para formar o histórico."}</p></article>`;
+    }
+    const points = item.points;
+    const values = points.map((point) => Number(point.profit_value));
+    const min = Math.min(0, ...values);
+    const max = Math.max(0, ...values);
+    const spread = max - min || 1;
+    const x = (index) => 28 + (points.length === 1 ? 0 : index * 584 / (points.length - 1));
+    const y = (value) => 166 - ((value - min) / spread) * 128;
+    const line = points.map((point, index) => `${x(index).toFixed(1)},${y(Number(point.profit_value)).toFixed(1)}`).join(" ");
+    const zeroY = y(0).toFixed(1);
+    const chartSvg = `<svg class="investment-monthly-svg" viewBox="0 0 640 210" role="img" aria-label="Evolução do rendimento em ${escapeHtml(item.currency)} no mês"><line x1="28" y1="38" x2="612" y2="38" class="investment-monthly-grid"/><line x1="28" y1="102" x2="612" y2="102" class="investment-monthly-grid"/><line x1="28" y1="166" x2="612" y2="166" class="investment-monthly-grid"/><line x1="28" y1="${zeroY}" x2="612" y2="${zeroY}" class="investment-monthly-zero"/><polyline points="${line}" class="investment-monthly-line"/>${points.map((point, index) => `<circle cx="${x(index).toFixed(1)}" cy="${y(Number(point.profit_value)).toFixed(1)}" r="3.5" class="investment-monthly-point"><title>${formatDate(point.date)} · ${portfolioMoney(point.profit_value, item.currency)}</title></circle>`).join("")}<text x="28" y="194" class="investment-monthly-axis">${formatDate(points[0].date)}</text><text x="612" y="194" text-anchor="end" class="investment-monthly-axis">${formatDate(points[points.length - 1].date)}</text></svg>`;
+    const excess = item.excess_percentage_points == null ? "—" : `${Number(item.excess_percentage_points) >= 0 ? "+" : ""}${Number(item.excess_percentage_points).toFixed(2).replace(".", ",")} p.p.`;
+    const cdi = item.cdi_percent == null ? "Indisponível" : `${Number(item.cdi_percent).toFixed(2).replace(".", ",")}%`;
+    const coverage = item.full_month_to_date ? "mês completo até hoje" : `desde ${formatDate(item.coverage_start)}`;
+    return `<article class="investment-monthly-currency"><div class="investment-monthly-heading"><h4>${escapeHtml(item.currency)} · ${escapeHtml(coverage)}</h4><span>${item.source_status === "complete" ? "dados completos" : "dados parciais"}</span></div><div class="investment-monthly-stats"><div><small>Rendimento no mês</small><strong>${portfolioMoney(item.profit_value, item.currency)}</strong></div><div><small>Retorno</small><strong>${Number(item.return_percent).toFixed(2).replace(".", ",")}%</strong></div><div><small>CDI no período</small><strong>${cdi}</strong></div><div><small>Acima do CDI</small><strong>${excess}</strong></div></div>${chartSvg}</article>`;
+  }).join("");
+  chart.innerHTML = groups;
+}
+
+async function loadInvestmentMonthlyPerformance(clientId = state.selected?.id) {
+  if (!clientId) return;
+  const button = $("investment-monthly-load");
+  if (button) { button.disabled = true; button.textContent = "Atualizando…"; }
+  setFeedback("investment-monthly-status", "Atualizando snapshots e consultando o CDI...");
+  try {
+    const performance = await api(`/clients/${clientId}/investment-monthly-performance`);
+    if (state.selected?.id !== clientId) return;
+    renderInvestmentMonthlyPerformance(performance);
+    const cdiDate = performance.cdi_as_of ? ` CDI atualizado até ${formatDate(performance.cdi_as_of)}.` : " CDI indisponível no momento.";
+    const status = performance.cdi_status === "cached" ? "Dados recentes do CDI em cache." : performance.cdi_status === "unavailable" ? "A fonte do CDI está indisponível." : "Dados do CDI atualizados.";
+    setFeedback("investment-monthly-status", `${performance.month} · ${status}${cdiDate}`);
+  } catch (error) {
+    if (state.selected?.id === clientId) setFeedback("investment-monthly-status", error.message, true);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = "Atualizar"; }
+  }
+}
+
+function renderInvestmentTransactions(transactions) {
+  const rows = transactions || [];
+  $("investment-transaction-list").innerHTML = rows.length ? rows.map((item) => {
+    const label = item.operation_type === "buy" ? "Compra" : "Venda";
+    const operationValue = portfolioMoney(item.net_value, item.currency);
+    const realized = item.realized_pnl == null || item.voided_at ? "" : " · resultado realizado " + (Number(item.realized_pnl) >= 0 ? "+" : "") + portfolioMoney(item.realized_pnl, item.currency);
+    const voided = item.voided_at ? "<small class=\"muted\">Operação anulada · " + escapeHtml(item.void_reason || "") + "</small>" : "<button class=\"button ghost small\" type=\"button\" data-investment-transaction-void=\"" + item.id + "\">Anular</button>";
+    return "<article class=\"investment-transaction-row\"><div><strong>" + label + " · " + escapeHtml(item.symbol) + "</strong><small class=\"muted\">" + formatDate(item.operation_date) + " · " + escapeHtml(item.market === "br" ? "B3" : "Exterior") + "</small></div><div><small>" + Number(item.quantity).toLocaleString("pt-BR", { maximumFractionDigits: 8 }) + " cotas × " + portfolioMoney(item.unit_price, item.currency) + "</small><small class=\"muted\">Bruto " + portfolioMoney(item.gross_value, item.currency) + " · taxas " + portfolioMoney(item.fees, item.currency) + realized + "</small></div><div class=\"investment-transaction-value\"><strong>" + operationValue + "</strong><small class=\"muted\">" + (item.operation_type === "buy" ? "total da compra" : "valor líquido da venda") + "</small>" + voided + "</div></article>";
+  }).join("") : '<p class="empty-line">Nenhuma operação registrada. Saldos cadastrados manualmente não têm histórico anterior.</p>';
+  document.querySelectorAll("[data-investment-transaction-void]").forEach((button) => { button.onclick = () => voidInvestmentTransaction(Number(button.dataset.investmentTransactionVoid)); });
 }
 
 function analyticsPercent(value) {
@@ -865,6 +991,7 @@ async function loadInvestmentSnapshots() {
   finally { if (button) { button.disabled = false; button.textContent = "Atualizar histórico"; } }
 }
 
+// Salva uma fotografia temporal da carteira para formar o histórico de evolução.
 async function captureInvestmentSnapshot() {
   if (!state.selected) return;
   const button = $("investment-history-capture");
@@ -878,6 +1005,7 @@ async function captureInvestmentSnapshot() {
   finally { if (button) { button.disabled = false; button.textContent = "Capturar agora"; } }
 }
 
+// Consulta históricos e benchmarks para gerar a análise comparativa da carteira.
 async function loadInvestmentAnalytics() {
   if (!state.selected) return;
   const period = $("investment-analytics-period").value;
@@ -913,19 +1041,79 @@ async function addInvestmentPosition(event) {
     return;
   }
   try {
-    const payload = { symbol: $("investment-symbol").value.trim(), market: $("investment-market").value, quantity, average_price: averagePrice, institution: $("investment-institution").value.trim() || null, notes: $("investment-notes").value.trim() || null };
+    const payload = { symbol: $("investment-symbol").value.trim(), name: $("investment-name").value.trim() || null, market: $("investment-market").value, quantity, average_price: averagePrice, institution: $("investment-institution").value.trim() || null, notes: $("investment-notes").value.trim() || null };
     const editing = Boolean(state.editingInvestmentPosition);
-    await api(editing ? "/clients/" + state.selected.id + "/investment-positions/" + state.editingInvestmentPosition.id : "/clients/" + state.selected.id + "/investment-positions", { method: editing ? "PATCH" : "POST", body: JSON.stringify(editing ? { quantity, average_price: averagePrice, institution: payload.institution, notes: payload.notes } : payload) });
+    await api(editing ? "/clients/" + state.selected.id + "/investment-positions/" + state.editingInvestmentPosition.id : "/clients/" + state.selected.id + "/investment-positions", { method: editing ? "PATCH" : "POST", body: JSON.stringify(editing ? { symbol: payload.symbol, name: payload.name, market: payload.market, quantity, average_price: averagePrice, institution: payload.institution, notes: payload.notes } : payload) });
     cancelInvestmentPositionEdit(false);
     setFeedback("investment-position-status", editing ? "Posição atualizada." : "Posição adicionada.");
     await selectClient(state.selected.id);
   } catch (error) { setFeedback("investment-position-status", error.message, true); }
 }
 
+async function addInvestmentTransaction(event) {
+  event.preventDefault();
+  if (!state.selected) return;
+  const submitButton = $("investment-transaction-form").querySelector("button[type='submit']");
+  if (submitButton.disabled) return;
+  const quantity = Number($("investment-transaction-quantity").value);
+  const unitPrice = Number($("investment-transaction-price").value);
+  const fees = Number($("investment-transaction-fees").value || 0);
+  const operationDate = $("investment-transaction-date").value;
+  if (!$("investment-transaction-symbol").value.trim() || !operationDate || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0 || !Number.isFinite(fees) || fees < 0) {
+    setFeedback("investment-transaction-status", "Informe ativo, data, quantidade, preço e taxas válidos.", true);
+    return;
+  }
+  submitButton.disabled = true;
+  try {
+    const payload = {
+      operation_type: $("investment-transaction-type").value,
+      symbol: $("investment-transaction-symbol").value.trim(),
+      name: $("investment-transaction-name").value.trim() || null,
+      market: $("investment-transaction-market").value,
+      operation_date: operationDate,
+      quantity,
+      unit_price: unitPrice,
+      fees,
+      institution: $("investment-transaction-institution").value.trim() || null,
+      notes: $("investment-transaction-notes").value.trim() || null,
+    };
+    const transaction = await api("/clients/" + state.selected.id + "/investment-transactions", { method: "POST", body: JSON.stringify(payload) });
+    $("investment-transaction-form").reset();
+    $("investment-transaction-date").value = localDateInputValue();
+    $("investment-transaction-market").value = "br";
+    $("investment-transaction-fees").value = "0";
+    const feedback = transaction.realized_pnl == null ? "" : " Resultado realizado: " + portfolioMoney(transaction.realized_pnl, transaction.currency) + ".";
+    setFeedback("investment-transaction-status", "Operação registrada." + feedback);
+    await selectClient(state.selected.id);
+  } catch (error) { setFeedback("investment-transaction-status", error.message, true); }
+  finally { submitButton.disabled = false; }
+}
+
+async function voidInvestmentTransaction(transactionId) {
+  if (!state.selected || !window.confirm("Anular esta operação e recalcular o saldo e o custo médio?")) return;
+  const reason = window.prompt("Informe o motivo da anulação (mínimo de 10 caracteres):")?.trim();
+  if (!reason || reason.length < 10) {
+    setFeedback("investment-transaction-status", "Informe um motivo com pelo menos 10 caracteres.", true);
+    return;
+  }
+  try {
+    await api("/clients/" + state.selected.id + "/investment-transactions/" + transactionId + "/void", { method: "POST", body: JSON.stringify({ reason }) });
+    setFeedback("investment-transaction-status", "Operação anulada e saldo recalculado.");
+    await selectClient(state.selected.id);
+  } catch (error) { setFeedback("investment-transaction-status", error.message, true); }
+}
+
+function localDateInputValue() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 10);
+}
+
 function startInvestmentPositionEdit(item) {
   if (!item) return;
   state.editingInvestmentPosition = item;
   $("investment-symbol").value = item.symbol;
+  $("investment-name").value = item.name || "";
   $("investment-market").value = item.market;
   $("investment-quantity").value = item.quantity;
   $("investment-average-price").value = item.average_price;
@@ -969,13 +1157,20 @@ function formatBytes(value) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Atualiza o texto do seletor para confirmar visualmente o arquivo escolhido.
+function updateDocumentFileName() {
+  const file = $("document-file").files[0];
+  $("document-file-name").textContent = file ? file.name : "Nenhum arquivo selecionado";
+}
+
 function renderDocuments(documents) {
-  const kindLabels = { income_proof: "Comprovante de renda", address_proof: "Comprovante de endereço", other: "Outro documento" };
+  const kindLabels = { identification: "Identificação", income_proof: "Comprovante de renda", address_proof: "Comprovante de endereço", other: "Outro documento" };
   $("documents-list").innerHTML = documents.length ? documents.map((item) => `<article class="quick-record document-record"><div><strong>${escapeHtml(item.original_name)}</strong><small class="muted">${escapeHtml(kindLabels[item.kind] || kindLabels.other)} · ${formatBytes(item.size_bytes)} · ${formatDate(item.created_at)}${item.description ? ` · ${escapeHtml(item.description)}` : ""}</small></div><div class="quick-record-actions"><button class="button ghost small" data-document-download="${item.id}" data-document-name="${escapeHtml(item.original_name)}">Baixar</button><button class="button ghost small" data-document-delete="${item.id}">Remover</button></div></article>`).join("") : '<p class="empty-line">Nenhum documento enviado.</p>';
   document.querySelectorAll("[data-document-download]").forEach((button) => { button.onclick = () => downloadDocument(Number(button.dataset.documentDownload), button.dataset.documentName); });
   document.querySelectorAll("[data-document-delete]").forEach((button) => { button.onclick = () => deleteDocument(Number(button.dataset.documentDelete)); });
 }
 
+// Envia documentos com multipart e atualiza a lista após a validação do backend.
 async function uploadDocument(event) {
   event.preventDefault();
   if (!state.selected) return;
@@ -989,6 +1184,7 @@ async function uploadDocument(event) {
   try {
     await api(`/clients/${state.selected.id}/documents`, { method: "POST", body: formData });
     $("document-form").reset();
+    updateDocumentFileName();
     setFeedback("document-status", "Documento enviado com sucesso.");
     await selectClient(state.selected.id);
   } catch (error) { setFeedback("document-status", error.message, true); }
@@ -1090,10 +1286,164 @@ function renderPermissions(permissions) {
 function renderFinancialProfile(profile) {
   $("monthly-income").value = profile?.monthly_income ?? 0;
   $("monthly-expenses").value = profile?.monthly_expenses ?? 0;
-  $("risk-profile").value = profile?.risk_profile ?? "";
+  const riskLabels = { conservative: "Conservador", moderate: "Moderado", aggressive: "Agressivo" };
+  $("risk-profile").value = riskLabels[profile?.risk_profile] || profile?.risk_profile || "";
   setFeedback("financial-status", profile ? "Dados carregados." : "Ainda não cadastrado. Preencha os dados para criar o perfil.");
 }
 
+// Mostra ao Advisor o resultado versionado do questionário do cliente.
+function renderSuitability(assessment) {
+  show("suitability-empty", !assessment);
+  show("suitability-content", Boolean(assessment));
+  if (!assessment) return;
+  const statusLabels = { pending_review: "Aguardando validação", approved: "Aprovada", rejected: "Nova avaliação solicitada", superseded: "Substituída" };
+  const clientResponseLabels = { pending: "Aguardando resposta do cliente", accepted: "Aceita pelo cliente", declined: "Recusada pelo cliente", adjustment_requested: "Ajustes solicitados pelo cliente" };
+  const recommendation = assessment.recommendation || {};
+  const financial = assessment.financial_situation || {};
+  $("suitability-summary").innerHTML = `<div><small>Objetivo</small><strong>${escapeHtml(assessment.objective_label)}</strong></div><div><small>Perfil indicado pelas respostas</small><strong>${escapeHtml(assessment.risk_profile_label)}</strong></div><div><small>Pontuação</small><strong>${escapeHtml(assessment.score)}</strong></div><div><small>Status</small><strong>${escapeHtml(statusLabels[assessment.status] || assessment.status)}</strong></div>`;
+  $("suitability-recommendation").textContent = `${recommendation.title || "Carteira sugerida"}. ${recommendation.summary || ""}`;
+  const recommendedActions = recommendation.recommended_actions || [];
+  $("suitability-recommended-actions").innerHTML = recommendedActions.length
+    ? `<h3>Próximas ações para validar a carteira</h3><ul>${recommendedActions.map((action) => `<li><strong>${escapeHtml(action.title)}</strong><br><span class="muted">${escapeHtml(action.detail)}</span></li>`).join("")}</ul>`
+    : "";
+  $("suitability-recommended-actions").classList.toggle("hidden", !recommendedActions.length);
+  const financialFlags = {
+    monthly_surplus_not_positive: "Saldo mensal cadastrado não é positivo.",
+    active_goal_within_2_years: "Há meta ativa com prazo nos próximos dois anos.",
+    no_patrimony_items_recorded: "Nenhum item de patrimônio foi cadastrado.",
+    liabilities_not_recorded: "O Talentum não registra dívidas ou outros passivos.",
+  };
+  const categoryRows = (financial.patrimony_by_category || []).map((item) => `<li>${escapeHtml(item.category)}: ${money(item.value)}</li>`).join("");
+  const goalRows = (financial.active_goals || []).map((goal) => `<li>${escapeHtml(goal.title)}: ${money(goal.current_value)} de ${money(goal.target_value)}${goal.target_date ? ` · prazo ${formatDate(goal.target_date)}` : ""}</li>`).join("");
+  const flags = [...new Set([...(financial.capacity_flags || []), ...(recommendation.financial_review_flags || [])])];
+  const flagList = flags.length ? `<ul>${flags.map((flag) => `<li>${escapeHtml(financialFlags[flag] || flag)}</li>`).join("")}</ul>` : "";
+  $("suitability-financial-context").innerHTML = financial.data_version
+    ? `<h3>Situação financeira confirmada pelo cliente</h3><div class="suitability-financial-grid"><span>Renda mensal<strong>${money(financial.monthly_income)}</strong></span><span>Despesas mensais<strong>${money(financial.monthly_expenses)}</strong></span><span>Saldo mensal<strong>${money(financial.monthly_surplus)}</strong></span><span>Patrimônio cadastrado, sem passivos<strong>${money(financial.patrimony_total)}</strong></span></div><p><strong>Patrimônio por categoria</strong></p>${categoryRows ? `<ul>${categoryRows}</ul>` : '<p class="muted">Nenhum item cadastrado.</p>'}<p><strong>Metas ativas</strong></p>${goalRows ? `<ul>${goalRows}</ul>` : '<p class="muted">Nenhuma meta ativa cadastrada.</p>'}${flagList ? `<div class="suitability-financial-flags"><strong>Pontos para revisar</strong>${flagList}</div>` : ""}<small class="muted">Dados confirmados em ${financial.client_confirmed_at ? formatDate(financial.client_confirmed_at) : "data não informada"}.</small>`
+    : '<p class="muted">Esta avaliação anterior não contém um registro financeiro confirmado.</p>';
+  const answerLabels = {
+    product_familiarity: "Familiaridade com produtos",
+    operation_products: "Produtos já utilizados",
+    operation_period: "Tempo de experiência",
+    operation_frequency: "Frequência das operações",
+    monthly_operation_volume: "Volume mensal aproximado",
+    financial_education: "Formação ou experiência profissional",
+  };
+  const optionLabels = {
+    none: "Nenhum / não realizou operações",
+    fixed_income: "Renda fixa",
+    funds: "Fundos de investimento",
+    stocks_etfs: "Ações e ETFs",
+    fiis: "Fundos imobiliários (FIIs)",
+    derivatives_structured: "Derivativos e produtos estruturados",
+    under_1_year: "Menos de 1 ano",
+    "1_to_3_years": "De 1 a 3 anos",
+    over_3_years: "Mais de 3 anos",
+    few_per_year: "Algumas vezes por ano",
+    monthly: "Mensalmente",
+    weekly_or_more: "Semanalmente ou mais",
+    under_1000: "Até R$ 1.000",
+    "1000_to_10000": "De R$ 1.000 a R$ 10.000",
+    over_10000: "Acima de R$ 10.000",
+    prefer_not_to_say: "Prefere não informar",
+    education: "Curso ou formação relacionada",
+    professional: "Experiência profissional na área",
+    both: "Formação e experiência profissional",
+  };
+  const experienceRows = Object.entries(answerLabels).map(([key, label]) => {
+    const raw = assessment.answers?.[key];
+    const values = String(raw || "").split(",").filter(Boolean);
+    const display = values.map((value) => optionLabels[value] || value).join(", ") || "Não informado";
+    return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(display)}</li>`;
+  }).join("");
+  const experienceFlags = (recommendation.knowledge_review_flags || []).map((flag) => {
+    const messages = {
+      no_prior_market_operations_reported: "O cliente declarou não ter realizado operações anteriormente.",
+      review_familiarity_with_recommended_products: "Confira a familiaridade do cliente com as classes sugeridas.",
+      no_financial_education_or_professional_experience_reported: "O cliente não relatou formação ou experiência profissional financeira.",
+    };
+    return `<li>${escapeHtml(messages[flag] || flag)}</li>`;
+  }).join("");
+  $("suitability-knowledge-context").innerHTML = `<h3>Conhecimento e histórico relatados</h3><ul>${experienceRows}</ul>${experienceFlags ? `<div class="suitability-financial-flags"><strong>Pontos para revisar</strong><ul>${experienceFlags}</ul></div>` : ""}<small class="muted">Essas respostas são apresentadas para análise do Advisor; não aumentam automaticamente o perfil de risco.</small>`;
+  $("suitability-allocations").innerHTML = (recommendation.allocations || []).map((allocation) => {
+    const segments = (allocation.suballocations || []).map((segment) => `<div class="suitability-segment"><div class="row-top"><span>${escapeHtml(segment.label)}</span><strong>${escapeHtml(segment.percentage)}%</strong></div><small class="muted">Exemplos para análise: ${escapeHtml((segment.examples || []).join(", "))}. ${escapeHtml(segment.rationale)}</small></div>`).join("");
+    const advisorAssets = (allocation.advisor_assets || []).map((asset) => `${asset.symbol} — ${asset.name}`).join(", ");
+    return `<div class="suitability-allocation"><div class="row-top"><strong>${escapeHtml(allocation.label)}</strong><span>${escapeHtml(allocation.percentage)}%</span></div><div class="bar"><i style="width:${Math.max(0, Math.min(100, Number(allocation.percentage || 0)))}%"></i></div><small class="muted">${escapeHtml(allocation.rationale)}</small>${advisorAssets ? `<div class="suitability-segment"><strong>Ativos selecionados pelo Advisor</strong><small class="muted">${escapeHtml(advisorAssets)}</small></div>` : ""}${segments}</div>`;
+  }).join("");
+  renderSuitabilityProposalEditor(assessment);
+  const expiryLabel = assessment.expires_at ? new Intl.DateTimeFormat("pt-BR").format(new Date(assessment.expires_at)) : "não informada";
+  const clientResponse = clientResponseLabels[assessment.client_response] || clientResponseLabels.pending;
+  const responseNote = assessment.client_response_note ? ` · Observação: ${assessment.client_response_note}` : "";
+  setFeedback("suitability-status", `${statusLabels[assessment.status] || assessment.status}. ${clientResponse}${responseNote}. Validade: ${expiryLabel}`);
+  $("suitability-approve").disabled = assessment.status === "approved";
+  $("suitability-reject").disabled = assessment.status === "rejected";
+}
+
+function renderSuitabilityProposalEditor(assessment) {
+  const recommendation = assessment.recommendation || {};
+  const allocations = recommendation.allocations || [];
+  const published = Boolean(recommendation.advisor_proposal_published_at);
+  const locked = assessment.client_response === "accepted" || assessment.status === "rejected" || assessment.status === "superseded";
+  if (!state.suitabilityProposalDraft || state.suitabilityProposalDraft.assessmentId !== assessment.id) {
+    state.suitabilityProposalDraft = {
+      assessmentId: assessment.id,
+      selectedClass: allocations[0]?.asset_class || "",
+      assetsByClass: Object.fromEntries(allocations.map((allocation) => [allocation.asset_class, (allocation.advisor_assets || []).map((asset) => ({ ...asset }))])),
+    };
+    state.suitabilityProposalSearchResults = [];
+  }
+  const draft = state.suitabilityProposalDraft;
+  if (!allocations.some((allocation) => allocation.asset_class === draft.selectedClass)) draft.selectedClass = allocations[0]?.asset_class || "";
+  const selectedAssets = allocations.map((allocation, allocationIndex) => {
+    const assets = draft.assetsByClass[allocation.asset_class] || [];
+    return assets.length ? `<div class="suitability-proposal-category"><strong>${escapeHtml(allocation.label)} (${escapeHtml(allocation.percentage)}%)</strong>${assets.map((asset, assetIndex) => `<div class="suitability-proposal-asset"><span><strong>${escapeHtml(asset.symbol)}</strong> · ${escapeHtml(asset.name)} <small class="muted">${asset.market === "br" ? "B3" : "Exterior"}</small></span>${locked ? "" : `<button class="button ghost small" type="button" data-suitability-remove="${allocationIndex}:${assetIndex}">Remover</button>`}</div>`).join("")}</div>` : "";
+  }).join("");
+  const results = state.suitabilityProposalSearchResults.map((asset, index) => `<article class="suitability-proposal-result"><span><strong>${escapeHtml(asset.symbol)}</strong> · ${escapeHtml(asset.name)}<small class="muted">${escapeHtml(asset.market === "br" ? "B3" : "Exterior")} · ${escapeHtml(asset.asset_type || "Ativo")} · ${escapeHtml(asset.currency || "")}</small></span><button class="button ghost small" type="button" data-suitability-add="${index}" ${locked ? "disabled" : ""}>Adicionar</button></article>`).join("");
+  const emptySearchMessage = state.suitabilityProposalQuery && !state.suitabilityProposalSearchResults.length
+    ? "Nenhum ativo encontrado para esta pesquisa."
+    : "Pesquise um ativo para adicionar à categoria selecionada.";
+  $("suitability-proposal-editor").innerHTML = `<div class="suitability-proposal-heading"><h3>Montar sugestão para o cliente</h3><span class="muted">Use as respostas e o perfil acima para selecionar ativos por categoria.</span></div>${published ? `<p class="feedback">Publicada em ${formatDate(recommendation.advisor_proposal_published_at)}${recommendation.advisor_proposal_by ? ` por ${escapeHtml(recommendation.advisor_proposal_by)}` : ""}.</p>` : ""}<label>Categoria da carteira<select id="suitability-proposal-category" ${locked ? "disabled" : ""}>${allocations.map((allocation) => `<option value="${escapeHtml(allocation.asset_class)}" ${draft.selectedClass === allocation.asset_class ? "selected" : ""}>${escapeHtml(allocation.label)} — ${escapeHtml(allocation.percentage)}%</option>`).join("")}</select></label><form id="suitability-proposal-search" class="suitability-proposal-search"><label>Pesquisar ativo<input id="suitability-proposal-query" type="search" maxlength="120" placeholder="Ticker ou nome" value="${escapeHtml(state.suitabilityProposalQuery)}" required ${locked ? "disabled" : ""}></label><label>Mercado<select id="suitability-proposal-market" ${locked ? "disabled" : ""}><option value="all" ${state.suitabilityProposalMarket === "all" ? "selected" : ""}>Todos</option><option value="br" ${state.suitabilityProposalMarket === "br" ? "selected" : ""}>Brasil (B3)</option><option value="global" ${state.suitabilityProposalMarket === "global" ? "selected" : ""}>Exterior</option></select></label><button class="button secondary small" type="submit" ${locked ? "disabled" : ""}>Pesquisar</button></form><div class="suitability-proposal-results">${results || `<p class="muted">${emptySearchMessage}</p>`}</div><h4>Ativos na sugestão</h4>${selectedAssets || '<p class="muted">Nenhum ativo adicionado.</p>'}<button id="suitability-proposal-publish" class="button primary small" type="button" ${locked ? "disabled" : ""}>${published ? "Atualizar e publicar sugestão" : "Publicar sugestão para o cliente"}</button>`;
+}
+
+async function searchSuitabilityProposal(event) {
+  event.preventDefault();
+  const query = $("suitability-proposal-query").value.trim();
+  if (!query) return;
+  state.suitabilityProposalQuery = query;
+  state.suitabilityProposalMarket = $("suitability-proposal-market").value;
+  try {
+    const params = new URLSearchParams({ q: query, market: state.suitabilityProposalMarket });
+    const data = await api(`/market/search?${params.toString()}`);
+    state.suitabilityProposalSearchResults = data.results || [];
+    renderSuitabilityProposalEditor(state.suitability);
+    setFeedback("suitability-status", `${state.suitabilityProposalSearchResults.length} ativo(s) encontrado(s).`);
+  } catch (error) { setFeedback("suitability-status", error.message, true); }
+}
+
+async function publishSuitabilityProposal() {
+  if (!state.selected || !state.suitability || !state.suitabilityProposalDraft) return;
+  const allocations = state.suitability.recommendation?.allocations || [];
+  const payload = { allocations: allocations.map((allocation) => ({ asset_class: allocation.asset_class, assets: state.suitabilityProposalDraft.assetsByClass[allocation.asset_class] || [] })) };
+  try {
+    state.suitability = await api(`/clients/${state.selected.id}/suitability/${state.suitability.id}/proposal`, { method: "PUT", body: JSON.stringify(payload) });
+    state.suitabilityProposalDraft = null;
+    state.suitabilityProposalSearchResults = [];
+    renderSuitability(state.suitability);
+    setFeedback("suitability-status", "Sugestão publicada. O cliente poderá aceitá-la na Carteira sugerida do aplicativo.");
+  } catch (error) { setFeedback("suitability-status", error.message, true); }
+}
+
+// Registra a decisão do Advisor e mantém o histórico de auditoria no backend.
+async function reviewSuitability(approved) {
+  if (!state.selected || !state.suitability) return;
+  try {
+    state.suitability = await api(`/clients/${state.selected.id}/suitability/${state.suitability.id}/review`, { method: "POST", body: JSON.stringify({ approved }) });
+    renderSuitability(state.suitability);
+    setFeedback("suitability-status", approved ? "Carteira aprovada e registrada." : "Nova avaliação solicitada ao cliente.");
+    await selectClient(state.selected.id);
+  } catch (error) { setFeedback("suitability-status", error.message, true); }
+}
+
+// Preenche o formulário cadastral com os dados visíveis e editáveis pelo Advisor.
 function renderClientProfile(profile) {
   $("client-profile-name").value = profile?.name ?? "";
   $("client-profile-phone").value = profile?.phone ?? "";
@@ -1144,6 +1494,7 @@ async function toggleClientAccess() {
   } catch (error) { setFeedback("assignment-status", error.message, true); }
 }
 
+// Persiste renda, despesas e perfil de risco do cliente selecionado.
 async function saveFinancialProfile(event) {
   event.preventDefault(); if (!state.selected) return;
   const payload = { monthly_income: Number($("monthly-income").value), monthly_expenses: Number($("monthly-expenses").value), risk_profile: $("risk-profile").value.trim() || null };
@@ -1161,6 +1512,7 @@ async function savePermissions() {
   catch (error) { setFeedback("permission-status", error.message, true); }
 }
 
+// Cria ou atualiza um relatório que será disponibilizado ao cliente.
 async function publishReport(event) {
   event.preventDefault(); if (!state.selected) return;
   const payload = { title: $("report-title").value.trim(), period_start: $("period-start").value, period_end: $("period-end").value, summary: $("report-summary").value.trim(), status: $("report-status-select").value };
@@ -1232,6 +1584,7 @@ async function deleteAdvisorGoal(goalId) {
   catch (error) { setFeedback("advisor-goal-status", error.message, true); }
 }
 
+// Cria ou atualiza uma ação do plano de acompanhamento do cliente.
 async function saveAction(event) {
   event.preventDefault(); if (!state.selected) return;
   const title = $("action-title").value.trim();
@@ -1301,6 +1654,7 @@ function closePasswordDialog() {
   $("password-form").reset();
 }
 
+// Troca a senha do usuário atual e encerra a sessão para exigir novo login.
 async function changePassword(event) {
   event.preventDefault();
   if ($("new-password").value !== $("confirm-password").value) { setFeedback("password-status", "As novas senhas não conferem.", true); return; }
@@ -1320,6 +1674,7 @@ function closeUserDialog() {
   $("user-form").reset();
 }
 
+// Permite ao administrador criar usuários e atualizar as listas do workspace.
 async function createUser(event) {
   event.preventDefault();
   if ($("new-user-password").value !== $("new-user-confirm").value) { setFeedback("user-status", "As senhas não conferem.", true); return; }
@@ -1329,14 +1684,19 @@ async function createUser(event) {
   } catch (error) { setFeedback("user-status", error.message, true); }
 }
 
+// Liga os formulários e controles da página aos handlers de negócio.
 $("login-form").addEventListener("submit", login); $("client-search").addEventListener("input", renderClients); $("client-status-filter").addEventListener("change", renderClients); $("manage-team").addEventListener("click", openTeamDialog); $("close-team").addEventListener("click", closeTeamDialog); $("new-user").addEventListener("click", openUserDialog); $("close-user").addEventListener("click", closeUserDialog); $("user-form").addEventListener("submit", createUser); $("change-password").addEventListener("click", openPasswordDialog); $("close-password").addEventListener("click", closePasswordDialog); $("password-form").addEventListener("submit", changePassword); $("save-permissions").addEventListener("click", savePermissions); $("save-financial-profile").addEventListener("click", saveFinancialProfile); $("financial-form").addEventListener("submit", saveFinancialProfile); $("save-client-profile").addEventListener("click", saveClientProfile); $("client-profile-form").addEventListener("submit", saveClientProfile); $("save-assignment").addEventListener("click", saveAssignment); $("assignment-form").addEventListener("submit", saveAssignment); $("toggle-client-access").addEventListener("click", toggleClientAccess); $("reset-client-password").addEventListener("click", resetSelectedClientPassword); $("advisor-patrimony-form").addEventListener("submit", addAdvisorPatrimony); $("advisor-patrimony-cancel").addEventListener("click", cancelPatrimonyEdit); $("advisor-goal-form").addEventListener("submit", addAdvisorGoal); $("advisor-goal-cancel").addEventListener("click", cancelGoalEdit); $("goal-filter").addEventListener("change", renderQuickRecords); $("action-form").addEventListener("submit", saveAction); $("action-filter").addEventListener("change", renderActionPlan); $("action-cancel").addEventListener("click", cancelActionEdit); $("report-form").addEventListener("submit", publishReport); $("report-filter").addEventListener("change", () => renderReports(state.reports)); $("cancel-report-edit").addEventListener("click", cancelReportEdit); $("logout").addEventListener("click", () => { sessionStorage.clear(); location.reload(); });
 $("document-form").addEventListener("submit", uploadDocument);
+$("document-file").addEventListener("change", updateDocumentFileName);
 $("investment-position-form").addEventListener("submit", addInvestmentPosition);
+$("investment-transaction-form").addEventListener("submit", addInvestmentTransaction);
+$("investment-transaction-date").value = localDateInputValue();
 $("investment-position-cancel").addEventListener("click", cancelInvestmentPositionEdit);
 $("investment-analytics-load").addEventListener("click", loadInvestmentAnalytics);
 $("investment-analytics-export").addEventListener("click", exportInvestmentAnalytics);
 $("investment-history-load").addEventListener("click", loadInvestmentSnapshots);
 $("investment-history-capture").addEventListener("click", captureInvestmentSnapshot);
+$("investment-monthly-load").addEventListener("click", () => loadInvestmentMonthlyPerformance());
 $("notifications").addEventListener("click", openNotificationsDialog);
 $("close-notifications").addEventListener("click", closeNotificationsDialog);
 $("mark-all-notifications").addEventListener("click", markAllNotificationsRead);
@@ -1361,5 +1721,34 @@ $("market-sort").addEventListener("change", (event) => { state.marketSort = even
 $("market-compare-button").addEventListener("click", compareSelectedMarketAssets);
 $("market-export-button").addEventListener("click", exportMarketAnalysis);
 $("market-compare-close").addEventListener("click", () => show("market-compare-panel", false));
+$("suitability-approve").addEventListener("click", () => reviewSuitability(true));
+$("suitability-reject").addEventListener("click", () => reviewSuitability(false));
+$("suitability-proposal-editor").addEventListener("submit", (event) => { if (event.target.id === "suitability-proposal-search") void searchSuitabilityProposal(event); });
+$("suitability-proposal-editor").addEventListener("change", (event) => { if (event.target.id !== "suitability-proposal-category" || !state.suitabilityProposalDraft) return; state.suitabilityProposalDraft.selectedClass = event.target.value; renderSuitabilityProposalEditor(state.suitability); });
+$("suitability-proposal-editor").addEventListener("click", (event) => {
+  const add = event.target.closest("[data-suitability-add]");
+  const remove = event.target.closest("[data-suitability-remove]");
+  if (add && state.suitabilityProposalDraft && state.suitability) {
+    const asset = state.suitabilityProposalSearchResults[Number(add.dataset.suitabilityAdd)];
+    const assetClass = state.suitabilityProposalDraft.selectedClass;
+    if (!asset || !assetClass) return;
+    const current = state.suitabilityProposalDraft.assetsByClass[assetClass] || [];
+    if (current.length >= 20) { setFeedback("suitability-status", "O limite é de 20 ativos por categoria.", true); return; }
+    if (!current.some((item) => item.symbol.toLowerCase() === asset.symbol.toLowerCase() && item.market === asset.market)) {
+      state.suitabilityProposalDraft.assetsByClass[assetClass] = [...current, { symbol: asset.symbol, name: asset.name, market: asset.market, asset_type: asset.asset_type || null, currency: asset.currency || null }];
+      renderSuitabilityProposalEditor(state.suitability);
+    }
+    return;
+  }
+  if (remove && state.suitabilityProposalDraft && state.suitability) {
+    const [allocationIndex, assetIndex] = remove.dataset.suitabilityRemove.split(":").map(Number);
+    const assetClass = state.suitability.recommendation.allocations[allocationIndex]?.asset_class;
+    if (!assetClass) return;
+    state.suitabilityProposalDraft.assetsByClass[assetClass].splice(assetIndex, 1);
+    renderSuitabilityProposalEditor(state.suitability);
+    return;
+  }
+  if (event.target.closest("#suitability-proposal-publish")) void publishSuitabilityProposal();
+});
 if (state.token) start();
 checkApiHealth();

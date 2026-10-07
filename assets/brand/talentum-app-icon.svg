@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Talentum — ícone do aplicativo</title>
+  <desc id="desc">Estrela geométrica violeta de quatro pontas, com halo lavanda e detalhe central verde.</desc>
+  <circle cx="128" cy="128" r="87" fill="none" stroke="#EEEAFD" stroke-width="14"/>
+  <path d="M128 58 C138 102 154 118 198 128 C154 138 138 154 128 198 C118 154 102 138 58 128 C102 118 118 102 128 58Z" fill="#5D4BC4"/>
+  <path d="M128 117 L139 128 L128 139 L117 128Z" fill="#1A9D91"/>
+</svg>

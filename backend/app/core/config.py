@@ -1,3 +1,6 @@
+# Talentum — backend/app/core/config.py
+# Responsabilidade: Centraliza configuração, autenticação, autorização e controles transversais da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from functools import lru_cache
 
 from pydantic import model_validator

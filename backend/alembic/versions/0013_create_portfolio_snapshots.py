@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0013_create_portfolio_snapshots.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create portfolio snapshots
 
 Revision ID: 0013_create_portfolio_snapshots

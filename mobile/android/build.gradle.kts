@@ -1,3 +1,5 @@
+// Talentum — mobile/android/build.gradle.kts
+// Responsabilidade: configura valores compartilhados pelos módulos Android.
 allprojects {
     repositories {
         google()
@@ -19,12 +21,10 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Keep optional annotation extraction out of all Flutter plugins in the
-// release package; it is not required for runtime behavior.
+// Keep optional lint analysis out of Flutter plugins in the release package.
 subprojects {
     tasks.configureEach {
-        if (name == "extractReleaseAnnotations" ||
-            name.startsWith("lintVital")) {
+        if (name.startsWith("lintVital")) {
             enabled = false
         }
     }

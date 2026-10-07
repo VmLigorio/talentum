@@ -1,3 +1,6 @@
+# Talentum — backend/app/services/market_alerts.py
+# Responsabilidade: Concentra regras de negócio e integrações reutilizáveis, mantendo as rotas mais simples.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime, timezone
 from decimal import Decimal
 

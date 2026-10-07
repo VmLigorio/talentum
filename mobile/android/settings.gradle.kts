@@ -1,3 +1,5 @@
+// Talentum — mobile/android/settings.gradle.kts
+// Responsabilidade: registra plugins e módulos usados pelo build Android.
 pluginManagement {
     val flutterSdkPath =
         run {
@@ -19,7 +21,7 @@ pluginManagement {
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id == "org.jetbrains.kotlin.android") {
-                useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
+                useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20")
             }
         }
     }
@@ -28,7 +30,8 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 include(":app")
+

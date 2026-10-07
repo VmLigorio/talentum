@@ -1,3 +1,6 @@
+# Talentum — backend/alembic/versions/0011_create_market_watchlist.py
+# Responsabilidade: Controla a evolução versionada do esquema do banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 """create market watchlist
 
 Revision ID: 0011_create_market_watchlist

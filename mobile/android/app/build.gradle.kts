@@ -1,3 +1,5 @@
+// Talentum — mobile/android/app/build.gradle.kts
+// Responsabilidade: configura o empacotamento do aplicativo Android.
 plugins {
     id("com.android.application")
     id("kotlin-android")

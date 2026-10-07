@@ -1,3 +1,6 @@
+# Talentum — backend/app/models/document.py
+# Responsabilidade: Define os modelos ORM que representam as entidades persistidas no banco de dados.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func

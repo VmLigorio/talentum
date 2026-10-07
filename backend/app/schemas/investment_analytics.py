@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/investment_analytics.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal

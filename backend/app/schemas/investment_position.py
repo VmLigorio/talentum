@@ -1,3 +1,6 @@
+# Talentum — backend/app/schemas/investment_position.py
+# Responsabilidade: Define os schemas de entrada e saída usados pela validação e documentação da API.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
@@ -48,6 +51,7 @@ class InvestmentPositionResponse(BaseModel):
 
 class InvestmentPositionCreate(BaseModel):
     symbol: str = Field(min_length=1, max_length=32)
+    name: str | None = Field(default=None, max_length=160)
     market: Literal["br", "global"]
     quantity: Decimal = Field(gt=0, max_digits=20, decimal_places=8)
     average_price: Decimal = Field(gt=0, max_digits=20, decimal_places=8)
@@ -56,6 +60,9 @@ class InvestmentPositionCreate(BaseModel):
 
 
 class InvestmentPositionUpdate(BaseModel):
+    symbol: str | None = Field(default=None, min_length=1, max_length=32)
+    name: str | None = Field(default=None, max_length=160)
+    market: Literal["br", "global"] | None = None
     quantity: Decimal | None = Field(default=None, gt=0, max_digits=20, decimal_places=8)
     average_price: Decimal | None = Field(default=None, gt=0, max_digits=20, decimal_places=8)
     institution: str | None = Field(default=None, max_length=120)

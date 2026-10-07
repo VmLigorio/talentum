@@ -1,3 +1,6 @@
+# Talentum — backend/tests/test_market_data.py
+# Responsabilidade: Contém testes automatizados que protegem o comportamento esperado do sistema.
+# Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from datetime import timezone
 
 from app.schemas.market import MarketHistoryPoint, MarketInstrument
