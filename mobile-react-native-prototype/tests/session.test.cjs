@@ -149,6 +149,7 @@ test('resposta da conta anterior não interfere no novo login', async () => {
   const delayed = deferred();
   const { api, store } = harness(async (url) => {
     if (url.endsWith('/auth/login')) return response(200, { access_token: 'other-access', refresh_token: 'other-refresh' });
+    if (url.endsWith('/auth/logout')) return response(204);
     await delayed.promise;
     return response(401, {});
   }, sessionStore());

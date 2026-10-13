@@ -26,6 +26,8 @@ dev_dependencies:
   flutter_lints: ^3.0.0
 
 dependency_overrides:
+  # image 4.11.0 usa ZLibDecoder.decodeLazy, incluído a partir do archive 4.4.0.
+  archive: ^4.4.0
   # Mantém a compilação Android independente da cadeia JNI/NDK opcional.
   path_provider_android: 2.2.22
 
