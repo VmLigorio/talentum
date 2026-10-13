@@ -1788,8 +1788,8 @@ function OptionButton({
   disabled?: boolean;
   onPress: () => void;
 }) {
+  // A opção ativa também é indicada só pelo estilo; seu estado não é acessível (achado 199).
   return (
-    {/* A opção ativa também é indicada só pelo estilo; seu estado não é acessível (achado 199). */}
     <Pressable disabled={disabled} onPress={onPress} style={[styles.option, active && styles.activeOption, disabled && styles.disabledOption]}>
       <Text style={[styles.optionText, active && styles.activeOptionText]}>{label}</Text>
     </Pressable>
@@ -1835,8 +1835,8 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
+  // A seleção atual altera somente o estilo; o estado não é anunciado ao leitor de tela (achado 199).
   return (
-    {/* A seleção atual altera somente o estilo; o estado não é anunciado ao leitor de tela (achado 199). */}
     <Pressable onPress={onPress} style={[styles.tab, active && styles.activeTab]}>
       <Text style={[styles.tabText, active && styles.activeTabText]}>{label}</Text>
     </Pressable>

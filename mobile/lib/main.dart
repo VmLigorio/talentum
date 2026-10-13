@@ -1020,8 +1020,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // Atualiza rendimento e CDI a cada hora sem recarregar os demais módulos da carteira.
     monthlyPerformanceTimer = Timer.periodic(const Duration(hours: 1), (_) {
       final clientId = user?['id'];
-      if (clientId is int)
+      if (clientId is int) {
         unawaited(_loadInvestmentMonthlyPerformance(clientId));
+      }
     });
   }
 
@@ -1152,7 +1153,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final clientId = user?['id'];
     if (clientId is! int ||
         investmentTransactionsBusy ||
-        !investmentTransactionsHasMore) return;
+        !investmentTransactionsHasMore) {
+      return;
+    }
     setState(() {
       investmentTransactionsBusy = true;
       investmentTransactionsError = null;
@@ -3390,8 +3393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: const TextStyle(fontWeight: FontWeight.w700)),
                       if (item['source_status'] == 'partial')
                         const Text('Dados parciais',
-                            style:
-                                const TextStyle(color: TalentumColors.error)),
+                            style: TextStyle(color: TalentumColors.error)),
                     ],
                   ),
                   if (item['full_month_to_date'] == false && start != null)
@@ -3497,7 +3499,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
-                value: investmentTransactionPeriod,
+                initialValue: investmentTransactionPeriod,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Período',
@@ -3525,7 +3527,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<String>(
-                value: investmentTransactionType,
+                initialValue: investmentTransactionType,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Tipo',
@@ -3868,7 +3870,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (_positionsByCurrency(positions).length > 1)
                 const Text(
                   'As moedas são apresentadas separadamente, sem conversão cambial.',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12, color: TalentumColors.muted),
                 ),
             ],
