@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 
+# Evita versionar arquivos locais com segredos; templates precisam de exceção explícita.
 .env
 .env.*
 !.env.example

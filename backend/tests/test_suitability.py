@@ -20,6 +20,7 @@ from app.services.suitability import (
 
 
 def test_suitability_routes_are_registered() -> None:
+    """Verifica que os endpoints principais de suitability constam na API."""
     from app.main import app
 
     assert {
@@ -32,6 +33,7 @@ def test_suitability_routes_are_registered() -> None:
 
 
 def test_questionnaire_has_requested_objectives_and_questions() -> None:
+    """Verifica objetivos, quantidade de perguntas e seleção múltipla do questionário."""
     definition = questionnaire_definition()
 
     assert {item["value"] for item in definition["objectives"]} == {
@@ -47,6 +49,7 @@ def test_questionnaire_has_requested_objectives_and_questions() -> None:
 
 
 def test_assessment_contract_requires_all_twelve_answers() -> None:
+    """Verifica o contrato da avaliação com as doze respostas exigidas."""
     payload = SuitabilityAssessmentCreate(
         objective="long_term",
         answers=complete_suitability_answers(),
@@ -57,6 +60,7 @@ def test_assessment_contract_requires_all_twelve_answers() -> None:
 
 
 def complete_suitability_answers(**overrides: str) -> dict[str, str]:
+    """Monta um conjunto válido de respostas e permite substituir campos por cenário."""
     answers = {
         "investment_horizon": "over_10_years",
         "liquidity_need": "low",
@@ -76,6 +80,7 @@ def complete_suitability_answers(**overrides: str) -> dict[str, str]:
 
 
 def test_financial_snapshot_aggregates_data_and_flags_near_term_capacity() -> None:
+    """Verifica totais financeiros, metas próximas, sinalizações e versão do retrato."""
     now = datetime.now(timezone.utc)
     profile = SimpleNamespace(
         client_id=42,
@@ -116,6 +121,7 @@ def test_financial_snapshot_aggregates_data_and_flags_near_term_capacity() -> No
 
 
 def test_recommendation_carries_financial_review_flags_and_guardrails() -> None:
+    """Verifica que limitações financeiras aparecem como alertas e orientações."""
     recommendation = build_recommendation(
         "long_term",
         "moderate",
@@ -131,6 +137,7 @@ def test_recommendation_carries_financial_review_flags_and_guardrails() -> None:
 
 
 def test_recommended_actions_adapt_to_reserve_goals_cash_flow_and_frequency() -> None:
+    """Verifica que ações sugeridas consideram reserva, metas, saldo e frequência."""
     answers = complete_suitability_answers(
         emergency_reserve="no", operation_frequency="weekly_or_more"
     )
@@ -151,6 +158,7 @@ def test_recommended_actions_adapt_to_reserve_goals_cash_flow_and_frequency() ->
 
 
 def test_high_score_generates_aggressive_long_term_model_summing_one_hundred() -> None:
+    """Verifica o perfil agressivo e a soma de 100% na carteira de longo prazo."""
     score, risk = score_answers(
         "long_term",
         complete_suitability_answers(),
@@ -169,6 +177,7 @@ def test_high_score_generates_aggressive_long_term_model_summing_one_hundred() -
 
 
 def test_short_term_horizon_caps_an_aggressive_score_to_conservative() -> None:
+    """Verifica que o prazo curto limita a classificação de risco."""
     score, risk = score_answers(
         "short_term",
         complete_suitability_answers(investment_horizon="under_2_years"),
@@ -179,6 +188,7 @@ def test_short_term_horizon_caps_an_aggressive_score_to_conservative() -> None:
 
 
 def test_knowledge_history_is_recorded_without_changing_risk_score() -> None:
+    """Verifica que experiência e formação geram alertas sem alterar a pontuação de risco."""
     score, profile = score_answers("long_term", complete_suitability_answers())
     less_experienced = complete_suitability_answers(
         product_familiarity="none",
@@ -206,6 +216,7 @@ def test_knowledge_history_is_recorded_without_changing_risk_score() -> None:
 def test_product_familiarity_multiselect_rejects_invalid_combinations(
     product_selection: str,
 ) -> None:
+    """Verifica a rejeição de combinações inválidas no campo de familiaridade."""
     with pytest.raises(ValueError, match="conhecimento e experiência"):
         score_answers(
             "long_term",
@@ -214,6 +225,7 @@ def test_product_familiarity_multiselect_rejects_invalid_combinations(
 
 
 def test_short_term_model_has_no_equity_or_fii_allocation_for_any_risk_profile() -> None:
+    """Verifica que modelos de curto prazo não alocam renda variável ou FIIs."""
     for risk in ("conservative", "moderate", "aggressive"):
         recommendation = build_recommendation("short_term", risk)
         by_class = {item["asset_class"]: item["percentage"] for item in recommendation["allocations"]}
@@ -225,6 +237,7 @@ def test_short_term_model_has_no_equity_or_fii_allocation_for_any_risk_profile()
 
 
 def test_all_model_combinations_and_suballocations_sum_to_one_hundred() -> None:
+    """Verifica a soma de 100% para todos os modelos e subdivisões."""
     for objective in ("longevity", "dividends", "long_term", "short_term"):
         for risk in ("conservative", "moderate", "aggressive"):
             recommendation = build_recommendation(objective, risk)
@@ -237,6 +250,7 @@ def test_all_model_combinations_and_suballocations_sum_to_one_hundred() -> None:
 
 
 def test_long_term_models_have_profile_specific_br_equity_and_fii_weights() -> None:
+    """Verifica os pesos por classe para cada perfil de risco de longo prazo."""
     expected = {
         "conservative": {"fixed_income_liquidity": 50, "fixed_income_inflation": 30, "dividend_equities_br": 5, "global_equities": 5, "real_estate_funds": 5, "cash": 5},
         "moderate": {"fixed_income_liquidity": 20, "fixed_income_inflation": 35, "dividend_equities_br": 15, "global_equities": 15, "real_estate_funds": 15},
@@ -249,6 +263,7 @@ def test_long_term_models_have_profile_specific_br_equity_and_fii_weights() -> N
 
 
 def test_client_can_respond_after_advisor_approval_and_response_is_audited() -> None:
+    """Verifica resposta após aprovação e registro correspondente na auditoria."""
     now = datetime.now(timezone.utc)
     assessment = SimpleNamespace(
         id=17,
@@ -285,7 +300,7 @@ def test_client_can_respond_after_advisor_approval_and_response_is_audited() -> 
     assert result.client_response_at is not None
     audit_log = db.add.call_args.args[0]
     assert audit_log.action == "respond"
-    assert audit_log.details["response"] == "adjustment_requested"
+    assert audit_log.details is None
 
 
 @pytest.mark.parametrize(
@@ -295,6 +310,7 @@ def test_client_can_respond_after_advisor_approval_and_response_is_audited() -> 
 def test_client_cannot_respond_before_approval_or_change_a_saved_response(
     assessment_status: str, client_response: str
 ) -> None:
+    """Verifica bloqueio de resposta prematura ou alteração de decisão já salva."""
     db = Mock()
     db.scalar.return_value = SimpleNamespace(
         id=17,

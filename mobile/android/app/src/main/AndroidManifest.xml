@@ -1,9 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permite ao cliente Flutter acessar a API e baixar documentos e relatórios. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- A permissão biométrica é fornecida pelo manifesto Android do plugin local_auth_android durante o merge do Gradle. -->
+    <!-- Builds de produção devem apontar para uma API HTTPS; a exceção HTTP fica no manifesto debug. -->
     <application
         android:label="Talentum"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Hospeda a interface Flutter e permite que o embedding trate mudanças de configuração. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -13,30 +17,23 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
+            <!-- Aplica o tema nativo durante a inicialização do Flutter e define o fundo da janela após a primeira tela. -->
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Registra a tela inicial do aplicativo para o launcher do Android. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <!-- O Flutter usa esta informação para registrar os plugins nativos no embedding v2. -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
-
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <!-- Declara a consulta de intents de texto usada pelo ProcessTextPlugin do Flutter no Android 11+. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>

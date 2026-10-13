@@ -10,9 +10,11 @@ from app.db.database import Base
 
 
 class Report(Base):
+    """Relatório patrimonial gerado e armazenado para consulta posterior."""
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Vincula o registro ao cliente e define o tema e o período coberto.
     client_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -20,6 +22,7 @@ class Report(Base):
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Separa rascunho de conteúdo publicado e registra a primeira publicação.
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="draft", server_default=text("'draft'")
     )

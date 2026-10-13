@@ -7,6 +7,7 @@ Revision ID: 0006_create_action_plan
 Revises: 0005_create_reports
 Create Date: 2026-09-18
 """
+# Finalidade: Cria tarefas e ações do plano de acompanhamento do cliente.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria tarefas e ações do plano de acompanhamento do cliente."""
+    # Associa cada ação ao cliente e mantém opcional o vínculo com uma meta específica.
     op.create_table(
         "action_items",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -37,11 +40,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["goal_id"], ["goals.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
+    # Facilita consultas de ações por cliente e por meta.
     op.create_index("ix_action_items_client_id", "action_items", ["client_id"], unique=False)
     op.create_index("ix_action_items_goal_id", "action_items", ["goal_id"], unique=False)
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Remove índices e tabela na ordem inversa à criação.
     op.drop_index("ix_action_items_goal_id", table_name="action_items")
     op.drop_index("ix_action_items_client_id", table_name="action_items")
     op.drop_table("action_items")

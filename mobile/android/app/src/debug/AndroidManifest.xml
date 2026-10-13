@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Libera HTTP somente no build de depuração para testes com API na rede local. -->
     <application android:usesCleartextTraffic="true" />
 </manifest>

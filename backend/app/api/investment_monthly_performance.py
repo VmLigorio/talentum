@@ -34,14 +34,17 @@ _cdi_cache: dict[str, tuple[datetime, list[tuple[date, Decimal]]]] = {}
 
 
 def _percent(value: Decimal) -> Decimal:
+    """Arredonda percentuais do relatório a quatro casas decimais."""
     return value.quantize(FOUR_PLACES, rounding=ROUND_HALF_UP)
 
 
 def _fetch_cdi_rates(month_key: str, start: date, end: date) -> tuple[list[tuple[date, Decimal]], str]:
+    """Obtém a série diária do CDI, reutilizando cache em falhas da fonte oficial."""
     now = datetime.now(timezone.utc)
     with _cdi_lock:
         cached = _cdi_cache.get(month_key)
         if cached and now - cached[0] < CDI_CACHE_TTL:
+            # Dentro do TTL a série ainda é tratada como atual; "cached" indica fallback após erro da fonte.
             return cached[1], "current"
     try:
         response = httpx.get(
@@ -76,7 +79,8 @@ def _compound_cdi(
     end: date,
     month_start: date,
 ) -> Decimal | None:
-    # A snapshot on the prior month's final date is the opening balance; CDI starts on day one.
+    """Compõe as taxas diárias do CDI somente no intervalo coberto pelos snapshots."""
+    # O snapshot do último dia do mês anterior representa o saldo inicial; o CDI começa no primeiro dia.
     first_cdi_day = month_start if start < month_start else start + timedelta(days=1)
     factor = Decimal("1")
     found = False
@@ -93,6 +97,7 @@ def _cdi_through(
     through: date,
     month_start: date,
 ) -> Decimal | None:
+    """Calcula o CDI acumulado até a data de um ponto da série mensal."""
     return _compound_cdi(rates, start, through, month_start)
 
 
@@ -105,19 +110,23 @@ def investment_monthly_performance(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InvestmentMonthlyPerformanceResponse:
+    """Consolida snapshots mensais por moeda e compara o retorno em reais com o CDI."""
     _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
 
+    # Usa o mês civil de São Paulo e converte seu início para comparar timestamps UTC.
     now = datetime.now(timezone.utc)
     local_now = now.astimezone(SAO_PAULO)
     month_start = local_now.date().replace(day=1)
     month_start_utc = datetime.combine(month_start, time.min, tzinfo=SAO_PAULO).astimezone(timezone.utc)
+    # Atualiza o saldo usado na série; se houver snapshot novo, a captura é persistida antes da leitura.
     captured = capture_client_snapshots(client_id, db, captured_at=now)
     if captured:
         db.commit()
         for snapshot in captured:
             db.refresh(snapshot)
 
+    # Lê uma pequena janela anterior ao mês para localizar o saldo-base mais recente.
     snapshots = list(
         db.scalars(
             select(PortfolioSnapshot)
@@ -129,6 +138,7 @@ def investment_monthly_performance(
             .order_by(PortfolioSnapshot.captured_at.asc())
         ).all()
     )
+    # Carrega o CDI do período e agrupa snapshots para nunca somar moedas diferentes.
     month_key = local_now.strftime("%Y-%m")
     rates, cdi_status = _fetch_cdi_rates(month_key, month_start, local_now.date())
     cdi_as_of = rates[-1][0] if rates else None
@@ -137,11 +147,13 @@ def investment_monthly_performance(
         grouped.setdefault(snapshot.currency, []).append(snapshot)
 
     currencies: list[CurrencyMonthlyPerformance] = []
+    # Define o saldo inicial e o último snapshot do mês para cada moeda.
     for currency, items in sorted(grouped.items()):
         before_month = [item for item in items if item.captured_at.astimezone(SAO_PAULO).date() < month_start]
         in_month = [item for item in items if item.captured_at.astimezone(SAO_PAULO).date() >= month_start]
         baseline = before_month[-1] if before_month else (in_month[0] if in_month else None)
         latest = in_month[-1] if in_month else None
+        # Sem saldo-base ou ponto do mês, retorna explicitamente cobertura insuficiente.
         if baseline is None or latest is None:
             currencies.append(
                 CurrencyMonthlyPerformance(
@@ -166,13 +178,16 @@ def investment_monthly_performance(
         full_month = baseline_date < month_start
         baseline_current = Decimal(baseline.current_total)
         baseline_invested = Decimal(baseline.invested_total)
+        # Subtrai o lucro já acumulado no saldo-base para isolar o resultado do mês.
         base_profit = baseline_current - baseline_invested
+        # A completude atual considera somente as pontas; snapshots intermediários podem ser parciais.
         data_complete = baseline.source_status == "complete" and latest.source_status == "complete" and baseline_current > 0
         monthly_profit: Decimal | None = None
         monthly_return: Decimal | None = None
         cdi_percent: Decimal | None = None
         excess: Decimal | None = None
         percent_of_cdi: Decimal | None = None
+        # Calcula retorno só com extremidades completas e compara CDI apenas para BRL.
         if data_complete and latest.id != baseline.id:
             monthly_profit = _percent((Decimal(latest.current_total) - Decimal(latest.invested_total)) - base_profit)
             monthly_return = _percent(monthly_profit / baseline_current * Decimal("100"))
@@ -183,6 +198,7 @@ def investment_monthly_performance(
                     if cdi_percent:
                         percent_of_cdi = _percent(monthly_return / cdi_percent * Decimal("100"))
 
+        # Mantém somente o último snapshot de cada dia para formar uma série legível.
         daily_last: dict[date, PortfolioSnapshot] = {}
         for snapshot in in_month:
             snapshot_date = snapshot.captured_at.astimezone(SAO_PAULO).date()
@@ -210,6 +226,7 @@ def investment_monthly_performance(
                     )
                 )
 
+        # Monta o resumo da moeda com sinalização explícita de cobertura e disponibilidade.
         currencies.append(
             CurrencyMonthlyPerformance(
                 currency=currency,

@@ -22,30 +22,35 @@ from app.schemas.market import (
 
 
 class _MarketCache:
-    """Small process-local cache that reduces provider pressure during repeated UI queries."""
+    """Cache local com prazo de validade para reduzir chamadas repetidas aos provedores."""
 
     def __init__(self) -> None:
+        """Inicializa valores em memória e o bloqueio para acesso concorrente."""
         self._items: dict[tuple[str, ...], tuple[float, Any]] = {}
         self._lock = RLock()
 
     def get(self, key: tuple[str, ...]) -> Any | None:
+        """Retorna um valor ainda válido e remove entradas expiradas."""
         with self._lock:
             item = self._items.get(key)
             if item is None:
                 return None
             expires_at, value = item
             if expires_at <= monotonic():
+                # A limpeza é apenas desta chave; outras entradas expiradas permanecem no dicionário.
                 self._items.pop(key, None)
                 return None
             return value
 
     def set(self, key: tuple[str, ...], value: Any, ttl_seconds: int) -> None:
+        """Armazena um valor até o prazo configurado, ignorando prazos não positivos."""
         if ttl_seconds <= 0:
             return
         with self._lock:
             self._items[key] = (monotonic() + ttl_seconds, value)
 
     def clear(self) -> None:
+        """Apaga todas as respostas guardadas no cache do processo."""
         with self._lock:
             self._items.clear()
 
@@ -55,15 +60,16 @@ _market_cache = _MarketCache()
 
 # Limpa o cache compartilhado para testes ou para uma atualização controlada.
 def clear_market_cache() -> None:
-    """Clear cached provider responses, primarily for tests and controlled refreshes."""
+    """Limpa respostas dos provedores para testes ou atualização controlada."""
 
     _market_cache.clear()
 
 
 class MarketDataService:
-    """Small provider adapter used by the Advisor/Adm research screen."""
+    """Adapta provedores de mercado aos formatos usados pelo Talentum."""
 
     def __init__(self) -> None:
+        """Carrega URLs, credenciais e limites de consulta a partir das configurações."""
         settings = get_settings()
         self.brapi_base_url = settings.brapi_base_url.rstrip("/")
         self.brapi_token = settings.brapi_token
@@ -74,6 +80,7 @@ class MarketDataService:
 
     # Pesquisa combina provedores por mercado e deduplica os resultados antes de responder.
     def search(self, query: str, market: MarketRegion) -> tuple[list[MarketInstrument], list[str]]:
+        """Pesquisa ativos por mercado, deduplica respostas e informa falhas de fonte."""
         normalized_query = query.strip().casefold()
         cache_key = ("search", market, normalized_query)
         cached = _market_cache.get(cache_key)
@@ -95,14 +102,15 @@ class MarketDataService:
 
         unique: dict[tuple[str, str], MarketInstrument] = {}
         for item in results:
-            unique[(item.market, item.symbol.upper())] = item
+            unique[(item.market, item.symbol.upper())] = item  # A última ocorrência do par mercado/ticker prevalece.
         value = (list(unique.values())[:30], warnings)
-        if not warnings:
+        if not warnings:  # Evita manter falhas parciais de provedores pelo TTL normal do cache.
             _market_cache.set(cache_key, value, self.cache_ttl_seconds)
         return value
 
     # Detalhes usam o provedor adequado e mantêm o último resultado em cache.
     def details(self, symbol: str, market: MarketRegion) -> MarketInstrument:
+        """Obtém a ficha atual do ativo e reutiliza resultado recente do cache."""
         normalized = symbol.strip().upper()
         if not normalized:
             raise ValueError("Informe um símbolo válido")
@@ -121,10 +129,11 @@ class MarketDataService:
 
     # Histórico delega a fonte por mercado e devolve uma série normalizada.
     def history(self, symbol: str, market: MarketRegion, period: MarketPeriod) -> MarketHistoryResponse:
+        """Obtém e normaliza a série histórica do ativo para o intervalo solicitado."""
         normalized = symbol.strip().upper()
         if not normalized:
             raise ValueError("Informe um símbolo válido")
-        cache_key = ("history", market, normalized, period)
+        cache_key = ("history", market, normalized, period)  # Cada período precisa da própria série em cache.
         cached = _market_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -137,8 +146,9 @@ class MarketDataService:
         _market_cache.set(cache_key, result, self.cache_ttl_seconds)
         return result
 
-    # Cria clientes HTTP com timeout, retry e autenticação opcional do Brapi.
+    # O cliente aplica timeout e retry, mas o cabeçalho da Brapi também segue ao Yahoo (achado 21).
     def _client(self) -> httpx.Client:
+        """Cria cliente HTTP com autenticação opcional, tentativas e limites definidos."""
         headers = {"Accept": "application/json", "User-Agent": "Talentum/0.1"}
         if self.brapi_token:
             headers["Authorization"] = f"Bearer {self.brapi_token}"
@@ -152,6 +162,7 @@ class MarketDataService:
 
     # Brasil prioriza cotação exata e usa a lista da Brapi para busca por nome.
     def _search_brazil(self, query: str) -> list[MarketInstrument]:
+        """Busca primeiro um ticker exato na Brapi e depois procura na lista da B3."""
         normalized = query.strip().upper()
         if not normalized:
             return []
@@ -160,8 +171,7 @@ class MarketDataService:
             "IBOVESPA": "^BVSP",
             "^BVSP": "^BVSP",
         }.get(normalized, normalized)
-        # The quote endpoint is reliable for an exact B3 ticker and also works
-        # without a token for the public examples supported by Brapi.
+        # A rota de cotação atende um ticker exato da B3 e pode funcionar sem token.
         if " " not in normalized and len(normalized) <= 12:
             with self._client() as client:
                 response = client.get(f"{self.brapi_base_url}/api/quote/{quote(quote_symbol, safe=',')}")
@@ -175,9 +185,8 @@ class MarketDataService:
                     if results:
                         return results
 
-        # Brapi's list endpoint is used for name/ticker discovery. Ask the
-        # provider to filter the complete B3 universe instead of only reading
-        # its first page. The current response uses stock/name/close/change.
+        # A Brapi filtra a lista completa da B3 para buscar por nome ou ticker.
+        # A resposta atual pode usar os campos stock, name, close e change.
         with self._client() as client:
             response = client.get(
                 f"{self.brapi_base_url}/api/quote/list",
@@ -206,6 +215,11 @@ class MarketDataService:
 
     # Busca cotação e indicadores brasileiros, mantendo uma resposta útil sem módulos premium.
     def _brazil_details(self, symbol: str) -> MarketInstrument:
+        """Consulta cotação brasileira e acrescenta indicadores opcionais de FIIs.
+
+        Atualmente, falhas de transporte nas consultas complementares podem interromper
+        a ficha mesmo quando a cotação base já foi encontrada.
+        """
         quote_symbol = {"IBOV": "^BVSP", "IBOVESPA": "^BVSP"}.get(symbol, symbol)
         with self._client() as client:
             response = client.get(
@@ -220,8 +234,8 @@ class MarketDataService:
                 if results:
                     item = self._brapi_item(results[0])
 
-            # Some Brapi plans expose the quote but restrict optional modules.
-            # Keep the detail screen useful with the basic quote in that case.
+            # Alguns planos liberam a cotação, mas restringem módulos opcionais.
+            # A consulta básica mantém a ficha útil quando isso ocorre.
             if item is None:
                 basic_response = client.get(
                     f"{self.brapi_base_url}/api/quote/{quote(quote_symbol, safe=',')}"
@@ -233,8 +247,7 @@ class MarketDataService:
                     if basic_results:
                         item = self._brapi_item(basic_results[0])
 
-            # FIIs have a dedicated endpoint with indicators that are not
-            # present in the generic quote response.
+            # FIIs têm uma rota própria para indicadores ausentes na cotação geral.
             if symbol.endswith("11") and symbol not in {"^BVSP"}:
                 fii_response = client.get(
                     f"{self.brapi_base_url}/api/v2/fii/indicators",
@@ -275,6 +288,7 @@ class MarketDataService:
 
     # A fonte internacional fornece os dados globais por símbolo.
     def _global_details(self, symbol: str) -> MarketInstrument:
+        """Localiza o símbolo internacional no Yahoo e completa seus dados de cotação."""
         with self._client() as client:
             response = client.get(
                 f"{self.yahoo_base_url}/v1/finance/search",
@@ -283,6 +297,7 @@ class MarketDataService:
             response.raise_for_status()
             payload = response.json()
             quotes = [item for item in payload.get("quotes", []) if isinstance(item, dict)]
+            # Sem correspondência exata, a implementação atual usa o primeiro resultado fuzzy.
             match = next((item for item in quotes if str(item.get("symbol", "")).upper() == symbol), quotes[0] if quotes else None)
             if not match:
                 raise ValueError(f"Ativo {symbol} não encontrado")
@@ -290,6 +305,7 @@ class MarketDataService:
 
     # O histórico brasileiro tenta Brapi e usa Yahoo como fallback de compatibilidade.
     def _brazil_history(self, symbol: str, period: MarketPeriod) -> MarketHistoryResponse:
+        """Busca série brasileira na Brapi e usa o Yahoo como alternativa de histórico."""
         quote_symbol = {"IBOV": "^BVSP", "IBOVESPA": "^BVSP"}.get(symbol, symbol)
         with self._client() as client:
             source = "brapi"
@@ -306,6 +322,7 @@ class MarketDataService:
             try:
                 benchmark_points, _ = self._fetch_brapi_history(client, "^BVSP", period)
             except (httpx.HTTPError, ValueError):
+                # Erros HTTP ou de parsing no benchmark não descartam a série do ativo.
                 try:
                     benchmark_points, _ = self._fetch_yahoo_history(client, "^BVSP", period)
                 except (httpx.HTTPError, ValueError):
@@ -324,12 +341,14 @@ class MarketDataService:
 
     @staticmethod
     def _yahoo_symbol_for_brazil(symbol: str) -> str:
+        """Adiciona o sufixo de negociação paulista ao ticker brasileiro no Yahoo."""
         if symbol.startswith("^") or symbol.endswith(".SA"):
             return symbol
         return f"{symbol}.SA"
 
     # Histórico internacional é obtido diretamente do endpoint de gráficos do Yahoo.
     def _global_history(self, symbol: str, period: MarketPeriod) -> MarketHistoryResponse:
+        """Busca histórico internacional e tenta obter o S&P 500 como referência."""
         with self._client() as client:
             points, currency = self._fetch_yahoo_history(client, symbol, period)
             if not points:
@@ -338,6 +357,7 @@ class MarketDataService:
             try:
                 benchmark_points, _ = self._fetch_yahoo_history(client, "^GSPC", period)
             except (httpx.HTTPError, ValueError):
+                # O histórico principal continua disponível sem os pontos do índice de referência.
                 pass
         return MarketHistoryResponse(
             symbol=symbol,
@@ -358,6 +378,7 @@ class MarketDataService:
         symbol: str,
         period: MarketPeriod,
     ) -> tuple[list[MarketHistoryPoint], str | None]:
+        """Converte candles da Brapi para pontos tipados da série histórica interna."""
         response = client.get(
             f"{self.brapi_base_url}/api/quote/{quote(symbol, safe=',')}",
             params={"range": period, "interval": "1d"},
@@ -395,6 +416,7 @@ class MarketDataService:
         symbol: str,
         period: MarketPeriod,
     ) -> tuple[list[MarketHistoryPoint], str | None]:
+        """Converte os arrays paralelos do Yahoo em pontos diários tipados."""
         response = client.get(
             f"{self.yahoo_base_url}/v8/finance/chart/{quote(symbol, safe='-._')}",
             params={"range": period, "interval": "1d", "includePrePost": "false"},
@@ -407,6 +429,7 @@ class MarketDataService:
         timestamps = result.get("timestamp", [])
         quote_data = (result.get("indicators", {}).get("quote", [{}]) or [{}])[0]
         rows: list[MarketHistoryPoint] = []
+        # Os campos do Yahoo vêm em listas paralelas; cada índice representa o mesmo pregão.
         for index, raw_timestamp in enumerate(timestamps):
             timestamp = _date(raw_timestamp)
             close = _number((quote_data.get("close") or [])[index] if index < len(quote_data.get("close") or []) else None)
@@ -426,6 +449,7 @@ class MarketDataService:
 
     # A busca global usa o endpoint de pesquisa para descobrir empresas e ETFs.
     def _search_global(self, query: str) -> list[MarketInstrument]:
+        """Pesquisa empresas globais e completa resultados sem cotação recente."""
         with self._client() as client:
             response = client.get(
                 f"{self.yahoo_base_url}/v1/finance/search",
@@ -461,6 +485,7 @@ class MarketDataService:
                 merged = {**item, **quote_items.get(symbol, {})}
                 result = self._yahoo_item(merged)
                 if result.price is None:
+                    # O fallback consulta cada gráfico dentro do loop e pode acumular os timeouts (achado 189).
                     result = self._enrich_yahoo_chart(client, result)
                 results.append(result)
             return results
@@ -468,6 +493,7 @@ class MarketDataService:
     @staticmethod
     # Converte o payload de cotação da Brapi para o schema interno da aplicação.
     def _brapi_item(item: dict[str, Any]) -> MarketInstrument:
+        """Mapeia nomes variáveis da Brapi para os campos comuns de um ativo."""
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
         statistics = item.get("defaultKeyStatistics") if isinstance(item.get("defaultKeyStatistics"), dict) else {}
         if not statistics and isinstance(data.get("defaultKeyStatistics"), dict):
@@ -482,6 +508,7 @@ class MarketDataService:
             currency=item.get("currency") or data.get("currency") or "BRL",
             price=_number(item.get("regularMarketPrice") or item.get("price") or item.get("close") or data.get("regularMarketPrice")),
             change=_number(item.get("regularMarketChange") or item.get("change_abs") or data.get("regularMarketChange")),
+            # O fallback por truthiness descarta variação percentual igual a zero (achado 193).
             change_percent=_number(item.get("regularMarketChangePercent") or item.get("changePercent") or item.get("change") or data.get("regularMarketChangePercent")),
             market_cap=_number(item.get("marketCap") or item.get("market_cap") or data.get("marketCap")),
             volume=_number(item.get("regularMarketVolume") or item.get("volume") or data.get("regularMarketVolume")),
@@ -504,6 +531,8 @@ class MarketDataService:
     @staticmethod
     # Acrescenta indicadores de fundos imobiliários sem perder a cotação base.
     def _merge_fii_details(item: MarketInstrument, fii: dict[str, Any]) -> MarketInstrument:
+        """Mescla indicadores de um FII e preserva dados já obtidos na cotação base."""
+        # Os fallbacks com `or` também substituem indicadores válidos iguais a zero.
         return item.model_copy(
             update={
                 "name": fii.get("name") or item.name,
@@ -524,10 +553,12 @@ class MarketDataService:
 
     # Tenta obter o relatório estruturado do FII quando o provedor o disponibiliza.
     def _load_fii_report(self, client: httpx.Client, symbol: str) -> FiiReportSummary | None:
+        """Busca o relatório mais recente do FII e converte seus indicadores disponíveis."""
         response = client.get(
             f"{self.brapi_base_url}/api/v2/fii/reports",
             params={"symbols": symbol, "limit": 1, "sortBy": "referenceDate", "sortOrder": "desc"},
         )
+        # O relatório do FII é complementar; uma resposta HTTP sem sucesso omite esse bloco.
         if not response.is_success:
             return None
         payload = response.json()
@@ -563,6 +594,7 @@ class MarketDataService:
     @staticmethod
     # Converte resultados de busca do Yahoo para o modelo usado pela interface.
     def _yahoo_item(item: dict[str, Any]) -> MarketInstrument:
+        """Converte campos de cotação do Yahoo para o modelo interno de ativo."""
         return MarketInstrument(
             market="global",
             symbol=str(item.get("symbol")),
@@ -592,6 +624,7 @@ class MarketDataService:
 
     # Enriquece um resultado global com métricas adicionais disponíveis no Yahoo.
     def _enrich_yahoo_item(self, client: httpx.Client, item: dict[str, Any]) -> MarketInstrument:
+        """Completa um resultado de busca com a cotação detalhada do Yahoo."""
         symbol = str(item.get("symbol", ""))
         response = client.get(
             f"{self.yahoo_base_url}/v7/finance/quote",
@@ -606,6 +639,7 @@ class MarketDataService:
 
     # Preenche detalhes usando o endpoint de gráfico quando a cotação é incompleta.
     def _enrich_yahoo_chart(self, client: httpx.Client, item: MarketInstrument) -> MarketInstrument:
+        """Usa dados do gráfico recente para completar cotação e variação diária."""
         if not item.symbol:
             return item
         response = client.get(
@@ -645,27 +679,33 @@ class MarketDataService:
     @staticmethod
     # Remove detalhes técnicos da exceção antes de mostrá-la ao usuário.
     def _safe_error(error: Exception) -> str:
+        """Limita o texto do erro de provedor antes de incluí-lo numa resposta da API."""
         message = str(error).strip()
         return message[:120] if message else "falha de comunicação"
 
 
 # Funções abaixo convertem valores externos e calculam indicadores derivados.
 def _number(value: Any) -> float | None:
+    """Converte valores externos para número e ignora booleanos ou formatos inválidos."""
     if value is None or isinstance(value, bool):
         return None
     try:
+        # A conversão atual não rejeita NaN nem infinito; o risco permanece no achado 17.
         return float(value)
     except (TypeError, ValueError):
         return None
 
 
 def _date(value: Any) -> datetime | None:
+    """Converte timestamps externos em UTC e preserva datas ISO sem offset como ingênuas."""
     if value is None:
         return None
     if isinstance(value, (int, float)):
+        # bool também passa nesta checagem por ser subtipo de int; timestamps inválidos podem lançar exceção (achado 74).
         return datetime.fromtimestamp(value, tz=timezone.utc)
     if isinstance(value, str):
         try:
+            # fromisoformat preserva strings sem offset como datetimes ingênuos.
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
@@ -673,8 +713,11 @@ def _date(value: Any) -> datetime | None:
 
 
 def _with_returns(points: list[MarketHistoryPoint]) -> list[MarketHistoryPoint]:
+    """Acrescenta retorno percentual usando o primeiro fechamento como referência."""
+    # Sem uma base não nula, preserva os pontos sem calcular percentuais indefinidos.
     if not points or points[0].close == 0:
         return points
+    # Todos os pontos são comparados ao primeiro fechamento do intervalo solicitado.
     base = points[0].close
     return [
         point.model_copy(update={"return_percent": round(((point.close / base) - 1) * 100, 6)})
@@ -683,26 +726,34 @@ def _with_returns(points: list[MarketHistoryPoint]) -> list[MarketHistoryPoint]:
 
 
 def _history_summary(points: list[MarketHistoryPoint]) -> dict[str, Any]:
+    """Resume volume, volatilidade anualizada, queda máxima e faixa de risco histórica."""
+    # Sem cotações não há observações para calcular os indicadores agregados.
     if not points:
         return {"observation_count": 0, "average_volume": None, "annualized_volatility": None, "max_drawdown": None, "volatility_band": None}
     closes = [point.close for point in points]
+    # Mede variações entre fechamentos consecutivos; dias sem fechamento anterior não entram.
     returns = [(closes[index] / closes[index - 1]) - 1 for index in range(1, len(closes)) if closes[index - 1]]
+    # Volume médio considera apenas pontos em que a fonte trouxe volume.
     average_volume = sum(point.volume for point in points if point.volume is not None) / max(sum(1 for point in points if point.volume is not None), 1)
     volatility = None
     if len(returns) > 1:
+        # Usa desvio-padrão amostral dos retornos diários antes da anualização.
         mean = sum(returns) / len(returns)
         variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+        # Anualiza retornos diários pela convenção de 252 pregões por ano.
         volatility = round((variance ** 0.5) * (252 ** 0.5) * 100, 6)
     peak = closes[0]
     drawdowns: list[float] = []
+    # A queda compara cada fechamento ao maior pico observado até aquele dia.
     for close in closes:
         peak = max(peak, close)
         drawdowns.append((close / peak - 1) * 100 if peak else 0)
     max_drawdown = round(min(drawdowns), 6)
+    # Os limites classificam a volatilidade anualizada percentual em três faixas.
     band = None if volatility is None else "lower" if volatility < 15 else "intermediate" if volatility < 30 else "higher"
     return {
         "observation_count": len(points),
-        "average_volume": round(average_volume, 2) if average_volume else None,
+        "average_volume": round(average_volume, 2) if average_volume else None,  # Média zero válida também vira ausência (achado 137).
         "annualized_volatility": volatility,
         "max_drawdown": max_drawdown,
         "volatility_band": band,

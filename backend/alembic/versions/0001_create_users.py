@@ -7,6 +7,7 @@ Revision ID: 0001_create_users
 Revises:
 Create Date: 2026-09-17
 """
+# Finalidade: Cria a tabela de contas, com credenciais, papel e estado de acesso.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria a tabela de contas, com credenciais, papel e estado de acesso."""
+    # Define a identidade, o hash da senha, o papel e os controles de sessão da conta.
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -63,4 +66,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Remove a tabela-base da cadeia depois que as migrações dependentes forem revertidas.
     op.drop_table("users")

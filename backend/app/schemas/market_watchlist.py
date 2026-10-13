@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class MarketWatchlistResponse(BaseModel):
+    """Ativo monitorado e seus dados de acompanhamento na API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -26,6 +28,8 @@ class MarketWatchlistResponse(BaseModel):
 
 
 class MarketWatchlistCreate(BaseModel):
+    """Dados necessários para adicionar um ativo à lista de observação."""
+
     client_id: int | None = Field(default=None, ge=1)
     symbol: str = Field(min_length=1, max_length=32)
     market: Literal["br", "global"]

@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 
 class MonthlyPortfolioPoint(BaseModel):
+    """Ponto mensal usado para apresentar a evolução da carteira."""
+
     date: date
     return_percent: Decimal
     cdi_return_percent: Decimal | None
@@ -16,6 +18,8 @@ class MonthlyPortfolioPoint(BaseModel):
 
 
 class CurrencyMonthlyPerformance(BaseModel):
+    """Desempenho mensal agregado de uma carteira em uma moeda."""
+
     currency: str
     invested_value: Decimal | None
     starting_invested_value: Decimal | None
@@ -32,6 +36,8 @@ class CurrencyMonthlyPerformance(BaseModel):
 
 
 class InvestmentMonthlyPerformanceResponse(BaseModel):
+    """Resposta da API com séries mensais e seus totais por moeda."""
+
     client_id: int
     month: str
     generated_at: datetime

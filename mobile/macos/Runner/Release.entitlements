@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Mantém o aplicativo isolado pelas regras de sandbox do macOS. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- Achados 104–105: faltam network.client e files.user-selected.read-write, necessários à API e ao file_picker. -->
 </dict>
 </plist>

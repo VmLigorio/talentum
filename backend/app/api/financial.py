@@ -32,6 +32,7 @@ router = APIRouter(prefix="/clients", tags=["financial"])
 
 
 def find_client(client_id: int, db: Session) -> User:
+    """Busca uma conta de cliente ou encerra a requisição com 404."""
     client = db.scalar(
         select(User).where(User.id == client_id, User.role == "client")
     )
@@ -49,6 +50,7 @@ def record_audit(
     resource: str,
     resource_id: int | None = None,
 ) -> None:
+    """Agenda um evento de auditoria dentro da transação atual."""
     db.add(
         AuditLog(
             actor_user_id=actor_user_id,
@@ -61,6 +63,7 @@ def record_audit(
 
 
 def check_read_access(client_id: int, current_user: User, db: Session) -> None:
+    """Confirma que o cliente existe e que o usuário pode consultá-lo."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
 
@@ -71,6 +74,7 @@ def get_financial_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FinancialProfile:
+    """Retorna o perfil financeiro do cliente autorizado."""
     check_read_access(client_id, current_user, db)
     profile = db.scalar(
         select(FinancialProfile).where(FinancialProfile.client_id == client_id)
@@ -87,6 +91,7 @@ def update_financial_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FinancialProfile:
+    """Cria ou atualiza renda, despesas e perfil de risco do cliente."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_financial_profile", current_user, db)
     profile = db.scalar(
@@ -95,8 +100,10 @@ def update_financial_profile(
     if profile is None:
         profile = FinancialProfile(client_id=client_id)
         db.add(profile)
+    # PUT aplica o conjunto completo; campos ausentes recebem os padrões do schema.
     for field, value in payload.model_dump().items():
         setattr(profile, field, value)
+    # Esta edição não invalida avaliações de suitability já aprovadas; veja o achado 128.
     record_audit(
         db,
         actor_user_id=current_user.id,
@@ -116,6 +123,7 @@ def list_patrimony(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PatrimonyItem]:
+    """Lista os itens patrimoniais do cliente em ordem de categoria."""
     check_read_access(client_id, current_user, db)
     return list(
         db.scalars(
@@ -133,10 +141,13 @@ def create_patrimony_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatrimonyItem:
+    """Registra um item patrimonial e audita a inclusão."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
+    # As restrições de tamanho do schema não removem espaços dos textos enviados diretamente à API.
     item = PatrimonyItem(client_id=client_id, **payload.model_dump())
     db.add(item)
+    # Gera o ID antes de incluir a referência do item no registro de auditoria.
     db.flush()
     record_audit(
         db,
@@ -159,6 +170,7 @@ def update_patrimony_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatrimonyItem:
+    """Atualiza somente os campos enviados de um item do cliente."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
     item = db.scalar(
@@ -168,6 +180,7 @@ def update_patrimony_item(
     )
     if item is None:
         raise HTTPException(status_code=404, detail="Item patrimonial não encontrado")
+    # Campos omitidos ficam intactos; valores enviados, inclusive null e textos sem trim, seguem para o ORM.
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     record_audit(
@@ -190,6 +203,7 @@ def delete_patrimony_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove um item patrimonial após validar acesso e registrar auditoria."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
     item = db.scalar(
@@ -217,6 +231,7 @@ def list_goals(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Goal]:
+    """Lista as metas do cliente na ordem usada pelo acompanhamento."""
     check_read_access(client_id, current_user, db)
     return list(
         db.scalars(
@@ -234,8 +249,10 @@ def create_goal(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Goal:
+    """Cria uma meta financeira e registra a ação na auditoria."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_goals", current_user, db)
+    # A validação de tamanho não normaliza o título; o texto é persistido como chegou no payload.
     goal = Goal(client_id=client_id, **payload.model_dump())
     db.add(goal)
     db.flush()
@@ -260,6 +277,7 @@ def update_goal(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Goal:
+    """Atualiza os campos informados de uma meta existente do cliente."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_goals", current_user, db)
     goal = db.scalar(
@@ -267,6 +285,7 @@ def update_goal(
     )
     if goal is None:
         raise HTTPException(status_code=404, detail="Meta não encontrada")
+    # Campos ausentes são preservados; null e textos enviados sem trim seguem para o ORM.
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(goal, field, value)
     record_audit(
@@ -289,6 +308,7 @@ def delete_goal(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove uma meta após validar o vínculo e registrar auditoria."""
     find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_goals", current_user, db)
     goal = db.scalar(select(Goal).where(Goal.id == goal_id, Goal.client_id == client_id))

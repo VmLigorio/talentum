@@ -9,11 +9,13 @@ from app.core.rate_limit import LoginRateLimiter
 
 
 def test_production_settings_reject_development_secrets() -> None:
+    """Verifica que configurações de desenvolvimento são recusadas em produção."""
     with pytest.raises(ValueError):
         Settings(environment="production")
 
 
 def test_production_settings_accept_explicit_secure_values() -> None:
+    """Verifica a aceitação de segredos e hosts de produção configurados."""
     settings = Settings(
         environment="production",
         jwt_secret="a" * 48,
@@ -26,6 +28,7 @@ def test_production_settings_accept_explicit_secure_values() -> None:
 
 
 def test_login_rate_limiter_blocks_and_resets() -> None:
+    """Verifica bloqueio por excesso de tentativas e limpeza após autenticação."""
     limiter = LoginRateLimiter(attempts=2, window_seconds=60)
 
     assert limiter.allow("ip:email")
@@ -38,9 +41,11 @@ def test_login_rate_limiter_blocks_and_resets() -> None:
 
 
 def test_uploaded_filename_is_safe_for_headers_and_paths() -> None:
+    """Verifica a normalização de nomes de arquivo usados pelo serviço de documentos."""
     assert safe_original_name("../../relatorio\r\n.pdf") == "relatorio__.pdf"
     assert safe_original_name("área financeira (2026).pdf") == "area financeira (2026).pdf"
 
 
 def test_identification_is_an_accepted_document_kind() -> None:
+    """Verifica a aceitação da categoria de documento de identificação."""
     assert "identification" in DOCUMENT_KINDS

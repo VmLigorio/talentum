@@ -5,6 +5,7 @@ from app.main import app
 
 
 def test_dashboard_and_report_routes_are_registered() -> None:
+    """Verifica o registro das rotas do painel e dos relatórios."""
     routes = app.openapi()["paths"]
 
     assert {

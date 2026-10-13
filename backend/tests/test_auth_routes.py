@@ -5,6 +5,7 @@ from app.main import app
 
 
 def test_auth_routes_are_registered() -> None:
+    """Verifica o registro das rotas de autenticação e administração."""
     routes = app.openapi()["paths"]
 
     assert {"/auth/login", "/auth/refresh", "/auth/logout", "/auth/change-password", "/auth/me"}.issubset(
@@ -13,6 +14,7 @@ def test_auth_routes_are_registered() -> None:
 
 
 def test_openapi_authorization_accepts_a_bearer_token() -> None:
+    """Verifica que a documentação OpenAPI declara autenticação Bearer."""
     security_schemes = app.openapi()["components"]["securitySchemes"]
 
     assert security_schemes["HTTPBearer"]["type"] == "http"
@@ -20,6 +22,7 @@ def test_openapi_authorization_accepts_a_bearer_token() -> None:
 
 
 def test_admin_routes_are_registered() -> None:
+    """Verifica o registro das rotas administrativas."""
     assert {"/admin/users", "/admin/users/{user_id}/status"}.issubset(
         app.openapi()["paths"]
     )

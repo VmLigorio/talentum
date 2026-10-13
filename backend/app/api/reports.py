@@ -18,6 +18,7 @@ router = APIRouter(prefix="/clients", tags=["reports"])
 
 
 def find_client(client_id: int, db: Session) -> User:
+    """Localiza uma conta de cliente ou retorna erro 404."""
     client = db.scalar(select(User).where(User.id == client_id, User.role == "client"))
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -25,6 +26,7 @@ def find_client(client_id: int, db: Session) -> User:
 
 
 def find_report(client_id: int, report_id: int, db: Session) -> Report:
+    """Busca um relatório dentro do cliente informado ou retorna erro 404."""
     report = db.scalar(
         select(Report).where(Report.id == report_id, Report.client_id == client_id)
     )
@@ -39,6 +41,7 @@ def list_reports(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Report]:
+    """Lista relatórios autorizados, ocultando rascunhos do cliente final."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     query = select(Report).where(Report.client_id == client_id)
@@ -54,6 +57,7 @@ def get_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Report:
+    """Retorna um relatório e oculta rascunhos de usuários clientes."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     report = find_report(client_id, report_id, db)
@@ -69,8 +73,10 @@ def create_report(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> Report:
+    """Cria um relatório e registra a data caso já seja publicado."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
+    # O schema valida o comprimento, mas título e resumo não são normalizados nesta rota.
     report = Report(client_id=client_id, **payload.model_dump())
     if report.status == "published":
         report.published_at = datetime.now(timezone.utc)
@@ -98,11 +104,15 @@ def update_report(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> Report:
+    """Atualiza um relatório e define a primeira data de publicação."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     report = find_report(client_id, report_id, db)
+    # O PATCH aplica chaves presentes, inclusive null; valores omitidos são preservados.
+    # Textos enviados são atribuídos como chegaram, sem remover espaços nas extremidades.
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(report, field, value)
+    # Registra a primeira publicação; se houver data anterior, uma republicação a preserva.
     if report.status == "published" and report.published_at is None:
         report.published_at = datetime.now(timezone.utc)
     record = AuditLog(
@@ -125,6 +135,7 @@ def delete_report(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove somente rascunhos e preserva relatórios já publicados."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     report = find_report(client_id, report_id, db)

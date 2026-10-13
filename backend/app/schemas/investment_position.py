@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvestmentAllocation(BaseModel):
+    """Participação de uma posição no total da carteira."""
+
     market: Literal["br", "global"]
     label: str
     currency: str
@@ -17,6 +19,8 @@ class InvestmentAllocation(BaseModel):
 
 
 class InvestmentCurrencyTotal(BaseModel):
+    """Totais financeiros consolidados para uma moeda específica."""
+
     currency: str
     invested_total: Decimal
     current_total: Decimal
@@ -26,6 +30,8 @@ class InvestmentCurrencyTotal(BaseModel):
 
 
 class InvestmentPositionResponse(BaseModel):
+    """Representação de uma posição de investimento devolvida pela API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -50,6 +56,8 @@ class InvestmentPositionResponse(BaseModel):
 
 
 class InvestmentPositionCreate(BaseModel):
+    """Dados validados para registrar uma nova posição de investimento."""
+
     symbol: str = Field(min_length=1, max_length=32)
     name: str | None = Field(default=None, max_length=160)
     market: Literal["br", "global"]
@@ -60,6 +68,10 @@ class InvestmentPositionCreate(BaseModel):
 
 
 class InvestmentPositionUpdate(BaseModel):
+    """Campos opcionais aceitos na atualização de uma posição existente."""
+
+    # A ausência preserva o campo no PATCH; null explícito ainda é aceito e
+    # pode atingir colunas obrigatórias, conforme o achado 88.
     symbol: str | None = Field(default=None, min_length=1, max_length=32)
     name: str | None = Field(default=None, max_length=160)
     market: Literal["br", "global"] | None = None
@@ -70,6 +82,8 @@ class InvestmentPositionUpdate(BaseModel):
 
 
 class InvestmentPortfolioResponse(BaseModel):
+    """Resposta consolidada com posições, alocações e totais da carteira."""
+
     client_id: int
     invested_total: Decimal | None
     current_total: Decimal | None

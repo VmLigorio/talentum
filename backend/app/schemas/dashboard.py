@@ -8,12 +8,16 @@ from pydantic import BaseModel
 
 
 class CategoryTotal(BaseModel):
+    """Total financeiro e participação de uma categoria patrimonial."""
+
     category: str
     total: Decimal
     percentage: Decimal
 
 
 class GoalProgress(BaseModel):
+    """Progresso calculado de uma meta apresentada no painel."""
+
     id: int
     title: str
     target_value: Decimal
@@ -24,6 +28,8 @@ class GoalProgress(BaseModel):
 
 
 class DashboardResponse(BaseModel):
+    """Resumo financeiro do cliente usado para montar o painel inicial."""
+
     client_id: int
     patrimony_total: Decimal
     patrimony_by_category: list[CategoryTotal]

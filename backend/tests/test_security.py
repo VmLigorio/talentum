@@ -9,6 +9,7 @@ from app.core.security import create_token, decode_token, hash_password, verify_
 
 
 def test_password_hash_is_not_reversible_text() -> None:
+    """Verifica que a senha é armazenada como hash irreversível."""
     password = "UmaSenhaForte123!"
     password_hash = hash_password(password)
 
@@ -18,6 +19,7 @@ def test_password_hash_is_not_reversible_text() -> None:
 
 
 def test_access_token_contains_expected_claims() -> None:
+    """Verifica os campos essenciais do token de acesso emitido."""
     token = create_token(
         subject=7,
         token_type="access",
@@ -33,6 +35,7 @@ def test_access_token_contains_expected_claims() -> None:
 
 
 def test_wrong_token_type_is_rejected() -> None:
+    """Verifica que um token de outra finalidade não é aceito como acesso."""
     token = create_token(
         subject=7,
         token_type="refresh",

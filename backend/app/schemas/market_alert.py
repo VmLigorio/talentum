@@ -13,6 +13,8 @@ MarketAlertStatus = Literal["active", "paused", "triggered", "cancelled"]
 
 
 class MarketAlertResponse(BaseModel):
+    """Condição de preço monitorada e seu estado atual."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -20,6 +22,7 @@ class MarketAlertResponse(BaseModel):
     client_name: str
     created_by_user_id: int
     symbol: str
+    # A resposta expõe o mercado sem informar a moeda da cotação.
     market: Literal["br", "global"]
     target_price: float
     condition: MarketAlertCondition
@@ -31,6 +34,8 @@ class MarketAlertResponse(BaseModel):
 
 
 class MarketAlertCreate(BaseModel):
+    """Parâmetros validados para criar um alerta de preço."""
+
     client_id: int | None = Field(default=None, ge=1)
     symbol: str = Field(min_length=1, max_length=32)
     market: Literal["br", "global"]
@@ -39,6 +44,10 @@ class MarketAlertCreate(BaseModel):
 
 
 class MarketAlertUpdate(BaseModel):
+    """Campos permitidos para editar ou reativar um alerta."""
+
+    # Os defaults permitem omitir campos, mas a união com None também aceita null explícito.
     target_price: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     condition: MarketAlertCondition | None = None
+    # Inclui estados normalmente produzidos pelo monitoramento/cancelamento (achado 191).
     status: MarketAlertStatus | None = None

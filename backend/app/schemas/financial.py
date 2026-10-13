@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class FinancialProfileResponse(BaseModel):
+    """Renda, despesas e perfil de risco cadastrados para o cliente."""
+
     model_config = ConfigDict(from_attributes=True)
 
     client_id: int
@@ -18,12 +20,17 @@ class FinancialProfileResponse(BaseModel):
 
 
 class FinancialProfileUpdate(BaseModel):
+    """Valores financeiros aceitos ao criar ou atualizar o perfil."""
+
+    # Como a rota usa PUT, omitir um campo aplica o padrão e substitui o valor salvo.
     monthly_income: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     monthly_expenses: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
     risk_profile: str | None = Field(default=None, max_length=30)
 
 
 class PatrimonyItemResponse(BaseModel):
+    """Bem ou investimento patrimonial retornado pela API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -38,6 +45,8 @@ class PatrimonyItemResponse(BaseModel):
 
 
 class PatrimonyItemCreate(BaseModel):
+    """Dados validados para incluir um item no patrimônio do cliente."""
+
     category: str = Field(min_length=2, max_length=40)
     description: str = Field(min_length=2, max_length=160)
     institution: str | None = Field(default=None, max_length=120)
@@ -46,6 +55,8 @@ class PatrimonyItemCreate(BaseModel):
 
 
 class PatrimonyItemUpdate(BaseModel):
+    """Campos opcionais aceitos ao atualizar um item patrimonial."""
+
     category: str | None = Field(default=None, min_length=2, max_length=40)
     description: str | None = Field(default=None, min_length=2, max_length=160)
     institution: str | None = Field(default=None, max_length=120)
@@ -54,6 +65,8 @@ class PatrimonyItemUpdate(BaseModel):
 
 
 class GoalResponse(BaseModel):
+    """Meta financeira persistida e seu estado de acompanhamento."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -68,6 +81,9 @@ class GoalResponse(BaseModel):
 
 
 class GoalCreate(BaseModel):
+    """Dados para registrar uma meta com valor-alvo e progresso inicial."""
+
+    # A criação começa ativa; o status só é aceito no schema de atualização.
     title: str = Field(min_length=2, max_length=160)
     target_value: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     current_value: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
@@ -75,6 +91,8 @@ class GoalCreate(BaseModel):
 
 
 class GoalUpdate(BaseModel):
+    """Campos opcionais aceitos para editar uma meta financeira."""
+
     title: str | None = Field(default=None, min_length=2, max_length=160)
     target_value: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     current_value: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)

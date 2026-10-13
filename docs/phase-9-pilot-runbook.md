@@ -29,6 +29,30 @@ Preencha e aprove cada item antes de convidar participantes:
 
 Não iniciar onboarding externo enquanto houver `PENDENTE` em ambiente/HTTPS, suporte, consentimento, critérios de parada ou licença/limites das fontes de mercado.
 
+## Verificação operacional antes e depois de reiniciar a API
+
+Execute estes passos somente no ambiente de homologação com dados fictícios. A API deve permanecer em uma única instância enquanto os monitores forem iniciados pelo ciclo de vida de cada processo.
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml ps
+./ops/production_preflight.sh
+docker compose --env-file .env.production -f docker-compose.production.yml logs --since=30m api
+```
+
+O preflight confirma que há exatamente um container `api` em execução e que `/health/ready` responde dentro do prazo. A prontidão verifica o banco e os serviços marcados como obrigatórios. Ao iniciar, a API registra os intervalos dos monitores. Os logs seguintes devem ser consultados por `X-Request-ID` quando se tratar de uma requisição, sem registrar nem copiar tokens, dados financeiros ou documentos.
+
+Para conferir retomada após reinício, faça a operação em janela de teste e repita os checks:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml restart api
+./ops/production_preflight.sh
+docker compose --env-file .env.production -f docker-compose.production.yml logs --since=15m api
+```
+
+Procure o registro `Monitores iniciados` e, nos ciclos seguintes, `Verificação de alertas de mercado`, `Snapshot da carteira` e `Verificação anual de documentos` quando houver trabalho registrado. Alertas e snapshots rodam de acordo com os intervalos configurados; revisão documental é diária. A ausência de log de resultado pode significar que não havia clientes ou alterações elegíveis, portanto use uma conta sintética com dados preparados para comprovar cada rotina. Não escale o serviço `api`: o preflight rejeita zero ou mais de uma instância.
+
+O backup e a restauração devem ser ensaiados em banco isolado seguindo [as instruções de backup e restauração](phase-7.md#backup-e-restauração). A restauração exige dump e checksum válidos e substitui objetos do banco indicado; nunca a execute contra produção durante o piloto.
+
 ## Onboarding acompanhado
 
 1. Confirmar que a pessoa recebeu a versão correta e o aviso de que participa de um piloto.

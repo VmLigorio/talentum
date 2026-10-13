@@ -1,16 +1,18 @@
 # Talentum — backend/app/api/investment_report.py
 # Emite um relatório PDF detalhado da carteira atual do cliente.
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 from html import escape
 from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor
+from traceback import extract_tb
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -36,6 +38,7 @@ from app.services.market_data import MarketDataService
 
 
 router = APIRouter(prefix="/clients", tags=["investment-reports"])
+logger = logging.getLogger(__name__)
 PAGE = landscape(A4)
 INK = colors.HexColor("#18233A")
 PURPLE = colors.HexColor("#5142A8")
@@ -46,27 +49,32 @@ RED = colors.HexColor("#B42318")
 
 
 def _br(value: Decimal | float | int | None, places: int = 2) -> str:
+    """Formata números com separadores brasileiros e retorna travessão para ausência."""
     if value is None:
         return "—"
-    number = f"{float(value):,.{places}f}"
+    number = f"{float(value):,.{places}f}"  # O cast pode arredondar cotas antes da exibição com oito casas (achado 135).
     return number.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
 def _money(value: Decimal | float | int | None, currency: str | None) -> str:
+    """Combina o código da moeda com o valor já formatado para o relatório."""
     if value is None:
         return "Sem cotação"
     return f"{currency or 'BRL'} {_br(value)}"
 
 
 def _safe(value: object | None) -> str:
+    """Escapa texto dinâmico antes de inseri-lo em parágrafos interpretados como HTML."""
     return escape(str(value)) if value not in (None, "") else "—"
 
 
 def _paragraph(text: str, styles: dict[str, ParagraphStyle], style: str = "body") -> Paragraph:
+    """Cria um parágrafo ReportLab usando um dos estilos padronizados do documento."""
     return Paragraph(text, styles[style])
 
 
 def _table(rows: list[list[object]], widths: list[float], *, small: bool = False) -> Table:
+    """Monta tabela paginável com cabeçalho escuro, linhas alternadas e grade discreta."""
     table = Table(rows, colWidths=widths, repeatRows=1, hAlign="LEFT")
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), INK),
@@ -86,6 +94,7 @@ def _table(rows: list[list[object]], widths: list[float], *, small: bool = False
 
 
 def _page(canvas, document) -> None:
+    """Desenha rodapé com identificação do Talentum e número da página atual."""
     canvas.saveState()
     width, height = PAGE
     canvas.setStrokeColor(colors.HexColor("#DCE1EA"))
@@ -98,6 +107,7 @@ def _page(canvas, document) -> None:
 
 
 def _position_market_details(service: MarketDataService, symbol: str, market: str) -> tuple[object | None, object | None]:
+    """Busca ficha e histórico do ativo, tratando indisponibilidade como dado ausente."""
     try:
         details = service.details(symbol, market)  # type: ignore[arg-type]
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
@@ -110,13 +120,16 @@ def _position_market_details(service: MarketDataService, symbol: str, market: st
 
 
 def _trailing_return(history: object | None) -> float | None:
+    """Calcula o retorno entre o primeiro e o último fechamento disponíveis."""
     points = getattr(history, "points", []) or []
     if len(points) < 2 or not points[0].close:
         return None
+    # Fechamentos externos não finitos ainda podem chegar aqui pelo conversor (achado 17).
     return ((points[-1].close / points[0].close) - 1) * 100
 
 
 def _build_pdf(client: User, positions, service: MarketDataService, monthly, transactions) -> bytes:
+    """Gera o PDF completo com resumo, desempenho, ativos, operações e limitações."""
     now = datetime.now(timezone.utc)
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -130,6 +143,7 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
         author="Talentum",
     )
     base = getSampleStyleSheet()
+    # Mantém estilos separados por hierarquia, tamanho e contraste das tabelas do PDF.
     styles = {
         "title": ParagraphStyle("ReportTitle", parent=base["Title"], fontName="Helvetica-Bold", fontSize=21, leading=25, textColor=INK, alignment=TA_LEFT, spaceAfter=4),
         "subtitle": ParagraphStyle("ReportSubtitle", parent=base["Normal"], fontSize=9, leading=13, textColor=MUTED, spaceAfter=10),
@@ -149,29 +163,34 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
     ]
 
     def collect(item):
+        """Reúne custo, cotação e indicadores de uma posição para as tabelas do PDF."""
         invested = item.quantity * item.average_price
         quote = _quote(item, service)
         _, current_price, currency, _ = quote
+        # Este fallback agrupa a posição; a tupla quote preserva a moeda original, como registrado no achado 20.
         currency = currency or ("BRL" if item.market == "br" else "USD")
         current_value = item.quantity * current_price if current_price is not None else None
         details, history = _position_market_details(service, item.symbol, item.market)
         return item, invested, current_value, currency, quote, details, history
 
-    # Consultas de mercado independentes são executadas em paralelo para carteiras maiores.
+    # Consulta cada posição em paralelo; latências se acumulam por grupo e não há prazo global.
     with ThreadPoolExecutor(max_workers=8) as pool:
         collected = list(pool.map(collect, positions))
     grouped: dict[str, list[tuple[object, Decimal, Decimal | None, str, object, object, object]]] = {}
     for record in collected:
         grouped.setdefault(record[3], []).append(record)
 
+    # Consolida valores por moeda para não somar posições sem conversão cambial.
     story.append(_paragraph("Resumo executivo", styles, "section"))
     summary_rows = [[_paragraph("Moeda", styles, "white"), _paragraph("Custo registrado", styles, "white"), _paragraph("Custo cotado", styles, "white"), _paragraph("Valor de mercado", styles, "white"), _paragraph("Resultado não realizado", styles, "white"), _paragraph("Resultado %", styles, "white"), _paragraph("Posições", styles, "white")]]
     for currency, records in sorted(grouped.items()):
+        # Mantém o custo total separado do subconjunto com cotação, sem misturar moedas.
         invested = sum((record[1] for record in records), Decimal("0"))
         priced = [record for record in records if record[2] is not None]
         priced_cost = sum((record[1] for record in priced), Decimal("0"))
         current = sum((record[2] for record in priced if record[2] is not None), Decimal("0"))
         pnl = current - priced_cost
+        # O retorno usa apenas posições cotadas e não é calculado quando o custo-base é zero.
         percent = (pnl / priced_cost * 100) if priced and priced_cost else None
         summary_rows.append([currency, _money(invested, currency), _money(priced_cost, currency), _money(current, currency), _money(pnl, currency), f"{_br(percent)}%" if percent is not None else "—", str(len(records))])
     if len(summary_rows) == 1:
@@ -179,11 +198,12 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
     story.append(_table(summary_rows, [20 * mm, 38 * mm, 38 * mm, 38 * mm, 42 * mm, 27 * mm, 18 * mm]))
     story.append(_paragraph("O custo cotado corresponde apenas às posições com cotação atual. Os totais são separados por moeda; ativos em moedas diferentes não são somados nem convertidos sem taxa de câmbio identificada.", styles, "small"))
 
+    # Mostra desempenho mensal e CDI quando a série possui dados suficientes.
     story.append(_paragraph("Desempenho no mês e comparação com o CDI", styles, "section"))
     story.append(_paragraph(f"Referência: {now.astimezone().strftime('%m/%Y')}. O desempenho mensal é estimado pelos registros de carteira disponíveis e comparado ao CDI diário publicado pelo Banco Central. O CDI e a comparação podem ficar indisponíveis quando a fonte externa ou a série histórica não responder.", styles, "body"))
     month_rows = [[_paragraph(value, styles, "white") for value in ["Moeda", "Investido no período", "Rendimento", "Retorno", "CDI", "Diferença vs. CDI", "% do CDI", "Cobertura"]]]
     for item in getattr(monthly, "currencies", []) or []:
-        cdi_is_comparable = item.currency == "BRL"
+        cdi_is_comparable = item.currency == "BRL"  # CDI é uma referência brasileira; as métricas comparativas não se aplicam às demais moedas.
         month_rows.append([
             item.currency,
             _money(item.invested_value, item.currency),
@@ -194,11 +214,12 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
             f"{_br(item.percent_of_cdi, 2)}%" if cdi_is_comparable and item.percent_of_cdi is not None else ("Não aplicável" if not cdi_is_comparable else "—"),
             f"Desde {item.coverage_start.strftime('%d/%m/%Y')}" if item.coverage_start else "Sem histórico suficiente",
         ])
-    if len(month_rows) == 1:
+    if len(month_rows) == 1:  # Mantém a seção visível e informa indisponibilidade quando não há série mensal.
         month_rows.append(["—", "—", "—", "—", "—", "—", "—", "Dados mensais indisponíveis"])
     story.append(_table(month_rows, [18 * mm, 30 * mm, 30 * mm, 24 * mm, 20 * mm, 29 * mm, 22 * mm, 42 * mm], small=True))
     story.append(_paragraph("Uma carteira com snapshots parciais não representa necessariamente o mês completo. A comparação com o CDI é informativa e não considera diferenças de risco, tributação, taxas, liquidez ou aportes e retiradas ao longo do período.", styles, "small"))
 
+    # Lista posição atual, indicadores disponíveis e origem/atualização das cotações.
     story.append(_paragraph("Detalhamento por ativo", styles, "section"))
     if not positions:
         story.append(_paragraph("Não há posições de investimento cadastradas para este cliente.", styles))
@@ -207,6 +228,7 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
         story.append(_paragraph(f"{_safe(currency)} · {len(records)} posição(ões)", styles, "subsection"))
         rows = [[_paragraph(value, styles, "white") for value in ["Ativo", "Cotas", "Preço médio registrado", "Custo da posição", "Cotação atual", "Valor atual", "Variação", "Variação %", "Peso"]]]
         for item, invested, current_value, _, quote, _, _ in records:
+            # Calcula variação contra o custo médio e peso apenas entre ativos cotados da moeda.
             name, current_price, quote_currency, source = quote
             pnl = current_value - invested if current_value is not None else None
             pnl_percent = pnl / invested * 100 if pnl is not None and invested else None
@@ -227,6 +249,7 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
         story.append(Spacer(1, 3 * mm))
 
         for item, invested, current_value, _, quote, details, history in records:
+            # Completa cada linha tabular com os indicadores e metadados disponíveis na fonte.
             _, current_price, currency_name, source = quote
             pnl = current_value - invested if current_value is not None else None
             pnl_percent = pnl / invested * 100 if pnl is not None and invested else None
@@ -257,10 +280,12 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
             story.append(KeepTogether(paragraphs))
             story.append(Spacer(1, 2 * mm))
 
+    # Registra as operações mais recentes e explica quando o histórico é parcial.
     story.append(_paragraph("Histórico de operações registradas", styles, "section"))
     if transactions:
         operation_rows = [[_paragraph(value, styles, "white") for value in ["Data", "Operação", "Ativo", "Cotas", "Preço unitário", "Valor bruto", "Taxas", "Valor líquido", "Resultado realizado"]]]
         for item in transactions:
+            # Exibe lucro realizado somente em vendas válidas; compras e operações anuladas não o recebem.
             operation_rows.append([
                 item.operation_date.strftime("%d/%m/%Y"),
                 ("Compra" if item.operation_type == "buy" else "Venda") + (" anulada" if item.voided_at else ""),
@@ -282,6 +307,7 @@ def _build_pdf(client: User, positions, service: MarketDataService, monthly, tra
     else:
         story.append(_paragraph("Ainda não há compras ou vendas registradas. Os saldos cadastrados antes do início do histórico são considerados posições de abertura e não têm operações anteriores detalhadas.", styles))
 
+    # Explicita premissas para evitar tratar estimativas e lacunas como dados exatos.
     story.append(_paragraph("Critérios, cobertura e limitações", styles, "section"))
     caveats = [
         "O custo da posição é calculado pela quantidade atual multiplicada pelo preço médio registrado no Talentum. O sistema não mantém, neste momento, o livro de ordens com preço, data, quantidade e taxas de cada compra ou venda; portanto, o relatório não atribui um preço histórico individual a cada aquisição.",
@@ -303,6 +329,8 @@ def download_investment_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
+    """Autoriza o cliente, gera o PDF, registra a exportação e devolve o arquivo."""
+    # Confere o escopo antes de carregar posições e o histórico pertencentes ao cliente.
     client = _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     positions = _load_positions(client_id, db)
@@ -317,21 +345,34 @@ def download_investment_report(
             .limit(300)
         ).all()
     )
+    # O PDF limita o histórico às 300 operações mais recentes para controlar seu tamanho.
     service = MarketDataService()
     try:
+        # Esta rotina também captura e confirma um snapshot antes de calcular o desempenho.
         monthly = investment_monthly_performance(client_id, current_user, db)
     except (HTTPException, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+        # Uma falha apenas nos dados mensais deixa essa seção indisponível, mas permite emitir o restante do PDF.
         monthly = None
     try:
         content = _build_pdf(client, positions, service, monthly, transactions)
     except Exception as exc:
+        frames = extract_tb(exc.__traceback__)
+        location = frames[-1] if frames else None
+        # Registra apenas o tipo e o ponto da falha, sem valores da carteira.
+        logger.error(
+            "Falha ao montar relatório PDF (tipo=%s, local=%s:%s em %s)",
+            type(exc).__name__,
+            location.filename.rsplit("/", 1)[-1] if location else "desconhecido",
+            location.lineno if location else "?",
+            location.name if location else "desconhecido",
+        )
         raise HTTPException(status_code=503, detail="Não foi possível montar o relatório da carteira agora.") from exc
+    # Registra a exportação com contagens e formato, sem copiar valores da carteira para a auditoria.
     db.add(AuditLog(
         actor_user_id=current_user.id,
         client_user_id=client_id,
         action="export",
         resource="investment_report",
-            details={"position_count": len(positions), "transaction_count": len(transactions), "format": "pdf"},
     ))
     db.commit()
     filename = f"relatorio-carteira-talentum-{client_id}.pdf"

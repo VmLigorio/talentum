@@ -3,13 +3,14 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // O plugin do Flutter depende de os plugins Android e Kotlin já estarem aplicados.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.example.talentum_mobile"
     compileSdk = flutter.compileSdkVersion
+    // Mantém a compatibilidade de bytecode Java e Kotlin no mesmo alvo de execução.
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -20,11 +21,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // TODO: Definir um identificador exclusivo antes da publicação nas lojas.
         applicationId = "com.example.talentum_mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // local_auth 3.x requires Android API 24 or newer.
+        // Os SDKs seguem a configuração do Flutter; a biometria exige Android API 24 ou superior.
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -33,13 +32,14 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // TODO: Configurar chave de assinatura de lançamento antes de distribuir o APK.
+            // A chave de depuração mantém o comando de release local funcional durante o desenvolvimento.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
 
 flutter {
+    // Aponta o plugin Gradle para a raiz do projeto Flutter que gera este módulo Android.
     source = "../.."
 }

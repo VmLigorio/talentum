@@ -16,6 +16,7 @@ router = APIRouter(prefix="/clients", tags=["action-plan"])
 
 
 def find_client(client_id: int, db: Session) -> User:
+    """Localiza uma conta de cliente ou retorna erro 404."""
     client = db.scalar(select(User).where(User.id == client_id, User.role == "client"))
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -23,6 +24,7 @@ def find_client(client_id: int, db: Session) -> User:
 
 
 def validate_goal(client_id: int, goal_id: int | None, db: Session) -> None:
+    """Confirma que a meta opcional pertence ao mesmo cliente da ação."""
     if goal_id is None:
         return
     if db.scalar(select(Goal.id).where(Goal.id == goal_id, Goal.client_id == client_id)) is None:
@@ -30,6 +32,7 @@ def validate_goal(client_id: int, goal_id: int | None, db: Session) -> None:
 
 
 def find_action(client_id: int, action_id: int, db: Session) -> ActionItem:
+    """Busca uma ação dentro do cliente informado ou retorna erro 404."""
     action = db.scalar(
         select(ActionItem).where(ActionItem.id == action_id, ActionItem.client_id == client_id)
     )
@@ -44,8 +47,10 @@ def list_actions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ActionItem]:
+    """Lista ações do plano do cliente após validar acesso."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
+    # Define uma ordem estável na API; Advisor e Flutter aplicam ranking visual de prioridade.
     return list(
         db.scalars(
             select(ActionItem)
@@ -62,11 +67,15 @@ def create_action(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> ActionItem:
+    """Cria uma ação vinculada a uma meta válida e registra auditoria."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
+    # Impede que uma ação do cliente aponte para a meta de outra pessoa.
     validate_goal(client_id, payload.goal_id, db)
+    # O schema limita o tamanho, mas o título chega sem trim para a persistência.
     action = ActionItem(client_id=client_id, **payload.model_dump())
     db.add(action)
+    # O flush gera o identificador necessário para registrar a auditoria antes do commit.
     db.flush()
     db.add(
         AuditLog(
@@ -90,10 +99,14 @@ def update_action(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> ActionItem:
+    """Atualiza os campos enviados da ação e registra a mudança."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     action = find_action(client_id, action_id, db)
+    # Valida a meta somente quando informada; null pode remover o vínculo atual.
     validate_goal(client_id, payload.goal_id, db)
+    # Campos omitidos ficam intactos; valores null enviados explicitamente seguem para o ORM.
+    # O título, se enviado, também é aplicado sem normalização de espaços.
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(action, field, value)
     db.add(
@@ -117,9 +130,11 @@ def delete_action(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove uma ação após confirmar acesso e registrar a auditoria."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     action = find_action(client_id, action_id, db)
+    # Auditoria e remoção são confirmadas juntas para não registrar ação inexistente.
     db.add(
         AuditLog(
             actor_user_id=current_user.id,

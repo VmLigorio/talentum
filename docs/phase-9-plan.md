@@ -8,17 +8,19 @@ Este documento é um plano de trabalho; os itens abaixo ainda não são entregas
 
 ## Andamento
 
-- Matriz inicial de aceitação criada em `docs/phase-9-acceptance-matrix.md`.
-- Cinco testes HTTP de autorização e onboarding foram aprovados no PostgreSQL de teste, conforme execução confirmada por Vitor.
-- A CI foi preparada com PostgreSQL temporário e migrations; as alterações ainda precisam chegar ao GitHub para validar o fluxo nela.
-- Próximo lote P0: executar os testes manuais do Android físico e validar o workflow de CI após push/PR. Os testes de integração de documentos já passaram em PostgreSQL isolado.
-- Etapa 4 verificada localmente: health check, reinício da API, backup com checksum, restauração em banco isolado e suíte completa (71 testes) passaram. A validação em produção e o armazenamento remoto criptografado ainda dependem do provedor.
-- Etapa 5 iniciada com roteiro de onboarding, gravidade de incidentes, feedback sem dados sensíveis e modelo de relatório em `docs/phase-9-pilot-runbook.md`. O piloto externo permanece aguardando o preenchimento e aprovação das condições de entrada.
-- Etapa 6 decidida em `docs/phase-9-decision.md`: GO limitado somente para ensaios internos com dados fictícios; NO-GO para participantes externos ou dados financeiros reais até fechar todos os bloqueios P0.
+- **Atualizado em 2026-10-12.** O último commit local é `1ad78bf` (`feat: aprimora histórico de operações`); este checkout está um commit à frente da referência remota e contém alterações locais ainda não commitadas. Preserve-as ao executar as próximas etapas.
+- A revisão estática por módulos e a documentação de propósito do código foram concluídas; consulte `docs/revisao-do-codigo.md` para escopo e limitações. Ela não substitui execução de testes, builds, testes visuais ou validação em aparelho.
+- **Etapa 2 em andamento:** corrigidos no checkout os achados #6, #7, #37, #58, #100, #154, #163 e #194. As alterações ainda precisam de retestes; a migration `0021_redact_audit_log_details` também precisa ser aplicada ao banco sintético/homologação antes de considerar o achado #100 validado.
+- A matriz de aceitação registra resultados históricos e itens parciais/pendentes. Não foi feita uma nova execução dos testes nesta atualização documental; use a matriz como fonte do estado reportado e registre novas evidências com commit, ambiente e data.
+- A CI foi confirmada verde pelo usuário para o commit `f41f4a0`; o commit local atual é posterior, portanto a execução verde não valida automaticamente as alterações seguintes.
+- A validação local anterior de backup/restauração e da suíte PostgreSQL permanece como evidência histórica descrita na matriz. Backup remoto criptografado e restauração no ambiente de homologação continuam pendentes.
+- A decisão vigente, registrada em `docs/phase-9-decision.md`, permite somente ensaios internos com dados fictícios. O piloto com participantes ou dados financeiros reais continua NO-GO até fechar os bloqueios P0 e preencher/aprovar as condições do roteiro.
+- **Etapa 4 em andamento:** reforçados o preflight de operação, a validação de instância única, os logs de inicialização dos monitores e as exigências de checksum de backup/restauração. Em 2026-10-12, o usuário confirmou checks locais positivos de containers, prontidão, reinício da API e logs; o ensaio de restauração isolada e a validação de homologação/preflight continuam pendentes. O procedimento está em `docs/phase-9-pilot-runbook.md`.
 
 ## Contexto observado no repositório
 
 - O MVP já contempla contas de cliente, Advisor e administrador, permissões, patrimônio, metas, carteira, plano de ação, relatórios, documentos e notificações dentro do sistema.
+- O backend é FastAPI; o Advisor é servido como HTML/CSS/JavaScript estático; `mobile/` contém o app Flutter principal e `mobile-react-native-prototype/` é um protótipo Expo separado.
 - O app Android ainda usa `com.example.talentum_mobile` como `applicationId` e assinatura de debug.
 - Alertas, snapshots e lembretes são iniciados junto com o processo da API. A implantação atual deve evitar múltiplas instâncias da API executando essas rotinas simultaneamente.
 - Operação do piloto: manter exatamente uma instância da API enquanto as rotinas periódicas forem iniciadas no ciclo de vida de cada processo. Não escalar horizontalmente até implementar e testar um worker dedicado ou exclusão mútua distribuída.

@@ -5,6 +5,7 @@ Revision ID: 0018_suitability_client_response
 Revises: 0017_investment_position_name
 Create Date: 2026-09-30
 """
+# Finalidade: Armazena a resposta do cliente a uma recomendação aprovada.
 
 from typing import Sequence, Union
 
@@ -19,6 +20,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Armazena a resposta do cliente a uma recomendação aprovada."""
+    # A resposta começa pendente; nota e instante são opcionais enquanto o
+    # cliente ainda não decidiu sobre a recomendação.
     op.add_column(
         "suitability_assessments",
         sa.Column(
@@ -39,6 +43,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Remove primeiro os detalhes opcionais e, por último, o estado da resposta.
     op.drop_column("suitability_assessments", "client_response_at")
     op.drop_column("suitability_assessments", "client_response_note")
     op.drop_column("suitability_assessments", "client_response")

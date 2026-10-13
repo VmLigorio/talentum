@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 
 class InvestmentAnalyticsPosition(BaseModel):
+    """Indicadores e valores calculados para uma posição individual."""
+
     id: int
     symbol: str
     market: Literal["br", "global"]
@@ -22,6 +24,8 @@ class InvestmentAnalyticsPosition(BaseModel):
 
 
 class InvestmentAnalyticsCurrencySummary(BaseModel):
+    """Resumo dos indicadores da carteira expresso em uma moeda."""
+
     currency: str
     invested_total: Decimal
     priced_position_count: int
@@ -30,6 +34,8 @@ class InvestmentAnalyticsCurrencySummary(BaseModel):
 
 
 class InvestmentBenchmark(BaseModel):
+    """Retorno de referência usado para comparar o desempenho da carteira."""
+
     market: Literal["br", "global"]
     symbol: str
     label: str
@@ -38,6 +44,8 @@ class InvestmentBenchmark(BaseModel):
 
 
 class InvestmentAnalyticsResponse(BaseModel):
+    """Resposta consolidada dos indicadores e comparações da carteira."""
+
     client_id: int
     period: Literal["1mo", "3mo", "6mo", "1y", "5y"]
     generated_at: datetime

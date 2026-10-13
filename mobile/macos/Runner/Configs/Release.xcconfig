@@ -1,2 +1,4 @@
+// Importa as opções geradas pelo Flutter para compilar o modo Release.
 #include "../../Flutter/Flutter-Release.xcconfig"
+// Mantém os avisos de compilação nativos também na configuração Release.
 #include "Warnings.xcconfig"

@@ -2,11 +2,12 @@ import Cocoa
 import FlutterMacOS
 import XCTest
 
+/// Agrupa os testes de integração nativos do alvo macOS.
 class RunnerTests: XCTestCase {
 
+  /// Mantém o placeholder do template; não verifica comportamento do aplicativo.
   func testExample() {
-    // If you add code to the Runner application, consider adding tests here.
-    // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
+    // Os testes nativos específicos do aplicativo podem ser adicionados aqui.
   }
 
 }

@@ -11,9 +11,11 @@ from app.db.database import Base
 
 
 class MarketAlert(Base):
+    """Condição de preço monitorada para um ativo do cliente."""
     __tablename__ = "market_alerts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Separa o cliente dono do alerta do usuário que o cadastrou.
     client_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
@@ -21,7 +23,9 @@ class MarketAlert(Base):
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Registra o mercado, mas a moeda efetiva do instrumento não é persistida.
     market: Mapped[str] = mapped_column(String(10), nullable=False)
+    # O alvo e a condição definem quando a regra de preço é atendida.
     target_price: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     condition: Mapped[str] = mapped_column(
         String(20), nullable=False, default="at_or_below", server_default=text("'at_or_below'")
@@ -29,6 +33,7 @@ class MarketAlert(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default=text("'active'")
     )
+    # Guarda a última observação e quando a condição foi disparada.
     last_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

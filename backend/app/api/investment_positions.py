@@ -28,6 +28,7 @@ CENT = Decimal("0.01")
 
 
 def _find_client(client_id: int, db: Session) -> User:
+    """Confirma que o identificador pertence a um usuário com perfil de cliente."""
     client = db.scalar(select(User).where(User.id == client_id, User.role == "client"))
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -35,6 +36,7 @@ def _find_client(client_id: int, db: Session) -> User:
 
 
 def _audit(db: Session, actor: User, client_id: int, action: str, item_id: int | None = None) -> None:
+    """Agenda um registro de auditoria para a alteração da posição patrimonial."""
     db.add(
         AuditLog(
             actor_user_id=actor.id,
@@ -47,6 +49,7 @@ def _audit(db: Session, actor: User, client_id: int, action: str, item_id: int |
 
 
 def _quote(item: InvestmentPosition, service: MarketDataService) -> tuple[str | None, Decimal | None, str | None, str | None]:
+    """Consulta a cotação do ativo e converte o preço para Decimal com segurança."""
     try:
         instrument = service.details(item.symbol, item.market)
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
@@ -61,12 +64,17 @@ def _position_response(
     current_total: Decimal,
     quote: tuple[str | None, Decimal | None, str | None, str | None] | None = None,
 ) -> InvestmentPositionResponse:
+    """Calcula valor atual, lucro, percentual e peso sem misturar moedas."""
+    # Usa quantidade e preço médio de compra para preservar o custo originalmente registrado.
     invested = item.quantity * item.average_price
+    # Consulta o provedor, reaproveita cotação fornecida pelo chamador e mantém o nome manual preferencial.
     quoted_name, current_price, currency, source = quote or _quote(item, service)
     name = item.name or quoted_name
     currency = currency or ("BRL" if item.market == "br" else "USD")
+    # Sem preço confiável, deixa valor atual e resultado indisponíveis em vez de estimá-los.
     current_value = item.quantity * current_price if current_price is not None else None
     pnl = current_value - invested if current_value is not None else None
+    # Calcula retorno e participação apenas quando há base válida; o total recebido usa a mesma moeda.
     pnl_percent = (pnl / invested * 100).quantize(CENT, rounding=ROUND_HALF_UP) if pnl is not None and invested else None
     allocation = (current_value / current_total * 100).quantize(CENT, rounding=ROUND_HALF_UP) if current_value is not None and current_total else Decimal("0")
     return InvestmentPositionResponse(
@@ -93,6 +101,7 @@ def _position_response(
 
 
 def _load_positions(client_id: int, db: Session) -> list[InvestmentPosition]:
+    """Carrega as posições do cliente em ordem estável de mercado e símbolo."""
     return list(
         db.scalars(
             select(InvestmentPosition)
@@ -103,10 +112,12 @@ def _load_positions(client_id: int, db: Session) -> list[InvestmentPosition]:
 
 
 def _portfolio(client_id: int, db: Session) -> InvestmentPortfolioResponse:
+    """Agrupa posições cotadas por moeda e monta totais e alocações da carteira."""
     items = _load_positions(client_id, db)
     service = MarketDataService()
     quotes: list[tuple[InvestmentPosition, Decimal, Decimal | None, str, tuple[str | None, Decimal | None, str | None, str | None]]] = []
     currency_totals: dict[str, dict[str, Decimal | int]] = {}
+    # Busca cotações e acumula totais separadamente para cada moeda.
     for item in items:
         invested = item.quantity * item.average_price
         quote = _quote(item, service)
@@ -114,14 +125,18 @@ def _portfolio(client_id: int, db: Session) -> InvestmentPortfolioResponse:
         currency = quote_currency or ("BRL" if item.market == "br" else "USD")
         current_value = item.quantity * price if price is not None else None
         totals = currency_totals.setdefault(currency, {"invested": Decimal("0"), "current": Decimal("0"), "pnl": Decimal("0"), "count": 0, "priced_count": 0})
+        # O custo investido inclui todas as posições, mesmo as que não têm cotação atual.
         totals["invested"] += invested
         totals["count"] += 1
         if current_value is not None:
+            # Valor atual e resultado incluem somente posições cotadas; o percentual abaixo ainda usa o custo total.
             totals["current"] += current_value
             totals["pnl"] += current_value - invested
             totals["priced_count"] += 1
         quotes.append((item, invested, current_value, currency, quote))
 
+    # Os pesos são relativos ao total da moeda do ativo; moedas diferentes nunca são somadas.
+    # Converte os valores acumulados para respostas individuais e pesos por mercado.
     positions = []
     allocation_values: dict[tuple[str, str], Decimal] = {}
     for item, _, current_value, currency, quote in quotes:
@@ -176,6 +191,7 @@ def get_investment_portfolio(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InvestmentPortfolioResponse:
+    """Retorna a carteira após validar existência e permissão de consulta."""
     _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     return _portfolio(client_id, db)
@@ -188,9 +204,12 @@ def create_investment_position(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InvestmentPositionResponse:
+    """Cadastra uma posição inicial, impedindo ativos duplicados no mesmo mercado."""
     _find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
-    symbol = payload.symbol.strip().upper()
+    symbol = payload.symbol.strip().upper()  # A validação de tamanho vem antes do strip; espaços podem virar símbolo vazio (achado 67).
+    # Esta pré-consulta evita duplicatas sequenciais, mas não protege gravações concorrentes no banco;
+    # ao contrário da rota de operações, este cadastro também não bloqueia a linha do cliente.
     duplicate = db.scalar(
         select(InvestmentPosition.id).where(
             InvestmentPosition.client_id == client_id,
@@ -215,6 +234,7 @@ def create_investment_position(
     _audit(db, current_user, client_id, "create", item.id)
     db.commit()
     db.refresh(item)
+    # Sem o total consolidado, a resposta de mutação calcula a alocação como zero.
     return _position_response(item, MarketDataService(), Decimal("0"))
 
 
@@ -226,6 +246,7 @@ def update_investment_position(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InvestmentPositionResponse:
+    """Atualiza dados cadastrais e protege saldos que já têm operações vinculadas."""
     _find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
     item = db.scalar(
@@ -237,6 +258,7 @@ def update_investment_position(
     if item is None:
         raise HTTPException(status_code=404, detail="Posição de investimento não encontrada")
     updates = payload.model_dump(exclude_unset=True)
+    # exclude_unset preserva null explícito; campos opcionais do schema podem chegar como None às colunas obrigatórias.
     has_transactions = db.scalar(
         select(InvestmentTransaction.id)
         .where(InvestmentTransaction.position_id == item.id)
@@ -250,6 +272,7 @@ def update_investment_position(
     if "symbol" in updates and isinstance(updates["symbol"], str):
         updates["symbol"] = updates["symbol"].strip().upper()
     if "symbol" in updates or "market" in updates:
+        # A checagem prévia não substitui uma constraint única capaz de serializar gravações concorrentes.
         duplicate = db.scalar(
             select(InvestmentPosition.id).where(
                 InvestmentPosition.client_id == client_id,
@@ -265,6 +288,7 @@ def update_investment_position(
     _audit(db, current_user, client_id, "update", item.id)
     db.commit()
     db.refresh(item)
+    # Sem o total consolidado, a resposta de mutação calcula a alocação como zero.
     return _position_response(item, MarketDataService(), Decimal("0"))
 
 
@@ -275,6 +299,7 @@ def delete_investment_position(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove uma posição sem histórico; posições operadas devem ser encerradas por venda."""
     _find_client(client_id, db)
     require_edit_permission(client_id, "can_edit_patrimony", current_user, db)
     item = db.scalar(

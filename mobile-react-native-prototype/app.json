@@ -11,7 +11,7 @@
       "package": "com.talentum.mobileprototype",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FAF9F6"
+        "backgroundColor": "#F7F9FA"
       }
     },
     "ios": {

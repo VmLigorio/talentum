@@ -7,6 +7,7 @@ Revision ID: 0017_investment_position_name
 Revises: 0016_suitability_assessments
 Create Date: 2026-09-24
 """
+# Finalidade: Adiciona um nome editável às posições de investimento.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Adiciona um nome editável às posições de investimento."""
+    # Nome legível opcional, independente do símbolo e do mercado do ativo.
     op.add_column(
         "investment_positions",
         sa.Column("name", sa.String(length=160), nullable=True),
@@ -28,4 +31,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # A reversão descarta o nome editável acrescentado à posição.
     op.drop_column("investment_positions", "name")

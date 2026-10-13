@@ -11,9 +11,12 @@ from app.db.database import Base
 
 
 class ClientProfile(Base):
+    """Dados cadastrais e vínculo com o assessor responsável."""
     __tablename__ = "client_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Garante um perfil por cliente; o Advisor associado pode ser removido sem
+    # apagar o cadastro do cliente.
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -25,6 +28,7 @@ class ClientProfile(Base):
         nullable=True,
         index=True,
     )
+    # Dados civis e de contato são opcionais para permitir cadastro progressivo.
     phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     father_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     mother_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -33,6 +37,7 @@ class ClientProfile(Base):
     address_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address_zip_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address_state: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Situação e datas acompanham o ciclo de vida do vínculo cadastral.
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -53,8 +58,10 @@ class ClientProfile(Base):
 
 
 class ClientPermission(Base):
+    """Permissões por área que controlam alterações feitas pelo cliente."""
     __tablename__ = "client_permissions"
 
+    # Uma linha por cliente; cada flag autoriza uma área independente e inicia negada.
     client_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
@@ -83,9 +90,11 @@ class ClientPermission(Base):
 
 
 class AuditLog(Base):
+    """Registro de ações relevantes para rastreabilidade e auditoria."""
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Referências opcionais preservam o evento mesmo se as contas forem removidas.
     actor_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -95,6 +104,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     resource: Mapped[str] = mapped_column(String(50), nullable=False)
     resource_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # JSON flexível pode conter dados pessoais ou financeiros; exposição está no achado 100.
     details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

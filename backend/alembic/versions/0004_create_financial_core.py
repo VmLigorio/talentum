@@ -7,6 +7,7 @@ Revision ID: 0004_create_financial_core
 Revises: 0003_create_client_access
 Create Date: 2026-09-17
 """
+# Finalidade: Cria perfil financeiro, itens patrimoniais e metas do cliente.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria perfil financeiro, itens patrimoniais e metas do cliente."""
+    # Mantém renda, despesas e perfil de risco vinculados individualmente ao cliente.
     op.create_table(
         "financial_profiles",
         sa.Column("client_id", sa.Integer(), nullable=False),
@@ -32,6 +35,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("client_id"),
     )
 
+    # Registra os bens e ativos declarados para compor o retrato patrimonial.
     op.create_table(
         "patrimony_items",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -48,6 +52,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_patrimony_items_client_id", "patrimony_items", ["client_id"], unique=False)
 
+    # Registra objetivos financeiros, prazo, valor alvo e progresso atual.
     op.create_table(
         "goals",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -66,6 +71,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Remove dependências na ordem inversa da criação para manter a reversão válida.
     op.drop_index("ix_goals_client_id", table_name="goals")
     op.drop_table("goals")
     op.drop_index("ix_patrimony_items_client_id", table_name="patrimony_items")

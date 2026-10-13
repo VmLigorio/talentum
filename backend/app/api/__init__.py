@@ -1,4 +1,4 @@
 # Talentum — backend/app/api/__init__.py
-# Responsabilidade: Expõe endpoints HTTP, valida o usuário atual e orquestra as operações do domínio.
+# Responsabilidade: Marca o pacote que agrupa os módulos de rotas HTTP do backend.
 # Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
-"""HTTP API routers for the Talentum backend."""
+"""Pacote dos módulos de rotas HTTP do backend Talentum."""

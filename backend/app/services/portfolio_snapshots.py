@@ -18,17 +18,20 @@ def capture_client_snapshots(
     db: Session,
     captured_at: datetime | None = None,
 ) -> list[PortfolioSnapshot]:
+    """Cria um snapshot por moeda e ignora capturas recentes já persistidas."""
     portfolio = _portfolio(client_id, db)
     if not portfolio.currency_totals:
         return []
 
     now = captured_at or datetime.now(timezone.utc)
+    # Conta apenas posições com cotação para que o status do snapshot indique cobertura incompleta.
     priced_by_currency: dict[str, int] = {}
     for position in portfolio.positions:
         if position.current_value is not None:
             priced_by_currency[position.currency or "BRL"] = priced_by_currency.get(position.currency or "BRL", 0) + 1
 
     snapshots: list[PortfolioSnapshot] = []
+    # Evita duplicatas sequenciais; leitura e inserção ainda podem concorrer entre requisições.
     for total in portfolio.currency_totals:
         latest = db.scalar(
             select(PortfolioSnapshot)
@@ -60,6 +63,7 @@ def capture_client_snapshots(
 
 
 def capture_all_portfolio_snapshots(db: Session) -> tuple[int, int, int]:
+    """Captura snapshots de todos os clientes ativos e conta falhas isoladamente."""
     client_ids = list(
         db.scalars(select(User.id).where(User.role == "client", User.is_active.is_(True))).all()
     )
@@ -67,8 +71,10 @@ def capture_all_portfolio_snapshots(db: Session) -> tuple[int, int, int]:
     failures = 0
     for client_id in client_ids:
         try:
+            # O savepoint permite desfazer a captura deste cliente sem abortar as demais do lote.
             with db.begin_nested():
                 snapshots_created += len(capture_client_snapshots(client_id, db))
         except Exception:
+            # Conta a falha deste cliente e permite que o lote tente os próximos.
             failures += 1
     return len(client_ids), snapshots_created, failures

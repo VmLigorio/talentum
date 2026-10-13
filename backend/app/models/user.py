@@ -10,12 +10,16 @@ from app.db.database import Base
 
 
 class User(Base):
+    """Conta de acesso do cliente, assessor ou administrador."""
     __tablename__ = "users"
 
+    # Chave referenciada pelos vínculos de cliente, auditoria e sessões autenticadas.
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Identidade de acesso; o e-mail é único no banco e a senha só é persistida como hash.
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Papel, ativação e versão da sessão controlam acesso e invalidação de tokens.
     role: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -34,6 +38,7 @@ class User(Base):
         default=0,
         server_default=text("0"),
     )
+    # Datas de ciclo de vida são geradas pelo banco e atualizadas nas alterações.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

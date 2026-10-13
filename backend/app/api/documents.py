@@ -23,7 +23,9 @@ from app.services.notifications import create_client_notification
 
 router = APIRouter(prefix="/clients", tags=["documents"])
 settings = get_settings()
+# Define um limite único para evitar que uploads ocupem o volume sem controle.
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+# Mantém a lista de tipos permitidos alinhada à extensão e à assinatura conferidas abaixo.
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
     "image/jpeg",
@@ -46,6 +48,7 @@ DOCUMENT_KINDS = {"identification", "income_proof", "address_proof", "other"}
 
 
 def find_client(client_id: int, db: Session) -> User:
+    """Localiza uma conta de cliente ou retorna erro 404."""
     client = db.scalar(select(User).where(User.id == client_id, User.role == "client"))
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -53,6 +56,7 @@ def find_client(client_id: int, db: Session) -> User:
 
 
 def find_document(client_id: int, document_id: int, db: Session) -> Document:
+    """Busca um documento vinculado ao cliente ou retorna erro 404."""
     document = db.scalar(
         select(Document).where(Document.id == document_id, Document.client_id == client_id)
     )
@@ -62,6 +66,8 @@ def find_document(client_id: int, document_id: int, db: Session) -> Document:
 
 
 def storage_path(stored_name: str) -> Path:
+    """Resolve o arquivo armazenado e bloqueia caminhos fora da pasta-base."""
+    # Resolver os dois caminhos antes da comparação impede travessia por segmentos como "..".
     root = Path(settings.storage_dir).resolve()
     path = (root / stored_name).resolve()
     if path.parent != root:
@@ -70,6 +76,7 @@ def storage_path(stored_name: str) -> Path:
 
 
 def safe_original_name(filename: str) -> str:
+    """Normaliza o nome original para uso seguro em cabeçalhos e registros."""
     name = Path(filename).name.replace("\r", "_").replace("\n", "_")
     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
     name = re.sub(r"[^A-Za-z0-9._ ()-]", "_", name).strip(" .")
@@ -82,6 +89,7 @@ def list_documents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Document]:
+    """Lista documentos do cliente em ordem cronológica decrescente."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     return list(
@@ -102,7 +110,9 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Document:
+    """Valida, verifica e armazena um documento enviado pelo assessor."""
     find_client(client_id, db)
+    # O papel client não pode enviar arquivos, mesmo que can_upload_documents esteja marcado.
     if current_user.role not in {"admin", "advisor"}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -111,6 +121,7 @@ async def upload_document(
     require_client_manager(client_id, current_user, db)
     if not file.filename:
         raise HTTPException(status_code=400, detail="Selecione um arquivo")
+    # A categoria é persistida e usada pelos clientes para organizar os documentos.
     if kind not in DOCUMENT_KINDS:
         raise HTTPException(status_code=422, detail="Categoria de documento inválida")
     content_type = file.content_type or "application/octet-stream"
@@ -122,6 +133,7 @@ async def upload_document(
 
     original_name = safe_original_name(file.filename)
     extension = Path(original_name).suffix.lower()
+    # A extensão é conferida junto ao Content-Type para não confiar apenas no cabeçalho enviado.
     expected_content_type = ALLOWED_EXTENSIONS.get(extension)
     if expected_content_type is None or expected_content_type != content_type:
         raise HTTPException(status_code=415, detail="A extensão do arquivo não corresponde ao tipo informado")
@@ -131,8 +143,11 @@ async def upload_document(
     size_bytes = 0
     first_chunk = True
     try:
+        # Grava em blocos para limitar memória e interrompe o upload assim que exceder 10 MB.
+        # As verificações de formato dependem de um bloco recebido; arquivo vazio sai do loop sem elas.
         with path.open("wb") as output:
             while chunk := await file.read(1024 * 1024):
+                # Confere assinatura binária ou codificação textual antes de aceitar o primeiro bloco.
                 if first_chunk and content_type in FILE_SIGNATURES and not chunk.startswith(FILE_SIGNATURES[content_type]):
                     raise HTTPException(status_code=415, detail="O conteúdo do arquivo não corresponde ao tipo informado")
                 if first_chunk and content_type == "text/plain":
@@ -146,12 +161,15 @@ async def upload_document(
                     raise HTTPException(status_code=413, detail="O arquivo excede o limite de 10 MB")
                 output.write(chunk)
     except HTTPException:
+        # Remove o arquivo incompleto quando uma validação HTTP esperada interrompe a gravação.
         path.unlink(missing_ok=True)
         raise
     finally:
+        # Fecha o objeto temporário da requisição em qualquer resultado da gravação.
         await file.close()
 
     try:
+        # A varredura acontece antes de persistir metadados ou disponibilizar o download.
         scan_file(path)
     except MalwareDetected as exc:
         path.unlink(missing_ok=True)
@@ -171,6 +189,7 @@ async def upload_document(
         description=description.strip() if description and description.strip() else None,
     )
     try:
+        # Registro, auditoria e notificação são confirmados na mesma transação.
         db.add(document)
         db.flush()
         db.add(
@@ -180,7 +199,6 @@ async def upload_document(
                 action="create",
                 resource="document",
                 resource_id=str(document.id),
-                details={"original_name": original_name, "size_bytes": size_bytes},
             )
         )
         create_client_notification(
@@ -192,9 +210,11 @@ async def upload_document(
             dedupe_key=f"document-uploaded:{document.id}",
         )
         db.commit()
+        # O refresh ainda está no bloco de compensação, embora a confirmação já tenha sido concluída.
         db.refresh(document)
     except Exception:
         db.rollback()
+        # Qualquer exceção remove o arquivo, inclusive se ocorrer depois do commit e deixar o registro persistido.
         path.unlink(missing_ok=True)
         raise
     return document
@@ -207,12 +227,14 @@ def download_document(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> FileResponse:
+    """Entrega o arquivo após validar vínculo, autorização e existência."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     document = find_document(client_id, document_id, db)
     path = storage_path(document.stored_name)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Arquivo do documento não encontrado")
+    # O nome original serve apenas como nome de download; o caminho vem do nome interno aleatório.
     return FileResponse(path, media_type=document.content_type, filename=document.original_name)
 
 
@@ -223,10 +245,12 @@ def delete_document(
     current_user: User = Depends(require_roles("admin", "advisor")),
     db: Session = Depends(get_db),
 ) -> None:
+    """Remove o registro e o arquivo após validar a permissão do usuário."""
     find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     document = find_document(client_id, document_id, db)
     path = storage_path(document.stored_name)
+    # Registra a autoria da exclusão antes de apagar o metadado associado ao arquivo.
     db.add(
         AuditLog(
             actor_user_id=current_user.id,
@@ -234,9 +258,9 @@ def delete_document(
             action="delete",
             resource="document",
             resource_id=str(document.id),
-            details={"original_name": document.original_name},
         )
     )
     db.delete(document)
     db.commit()
+    # A exclusão física vem após o commit; se falhar, o arquivo fica sem registro (achado 24).
     path.unlink(missing_ok=True)

@@ -18,9 +18,11 @@ router = APIRouter(prefix="/clients", tags=["portfolio-snapshots"])
 
 
 def _list_snapshots(client_id: int, db: Session, limit: int, currency: str | None) -> list[PortfolioSnapshot]:
+    """Filtra snapshots por cliente/moeda e devolve os mais antigos primeiro."""
     query = select(PortfolioSnapshot).where(PortfolioSnapshot.client_id == client_id)
     if currency:
         query = query.where(PortfolioSnapshot.currency == currency.upper())
+    # Limita aos registros mais recentes e depois inverte para devolver a série cronológica.
     latest = list(
         db.scalars(
             query.order_by(PortfolioSnapshot.captured_at.desc()).limit(limit)
@@ -37,6 +39,7 @@ def get_investment_snapshots(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PortfolioSnapshot]:
+    """Lista o histórico de snapshots após validar acesso ao cliente."""
     _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     return _list_snapshots(client_id, db, limit, currency)
@@ -52,6 +55,7 @@ def capture_investment_snapshots(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PortfolioSnapshot]:
+    """Captura e persiste um retrato atual da carteira para a série de desempenho."""
     _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     snapshots = capture_client_snapshots(client_id, db)

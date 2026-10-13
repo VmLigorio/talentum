@@ -5,6 +5,7 @@ from app.main import app
 
 
 def test_financial_routes_are_registered() -> None:
+    """Verifica o registro das rotas financeiras na aplicação."""
     routes = app.openapi()["paths"]
 
     assert {

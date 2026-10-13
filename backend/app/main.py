@@ -1,6 +1,9 @@
+"""Inicializa a API, seus middlewares, rotas e tarefas de fundo."""
+
 import asyncio
 import logging
 import re
+import socket
 from time import perf_counter
 from uuid import uuid4
 from contextlib import asynccontextmanager
@@ -11,6 +14,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
+from redis import Redis
+from redis.exceptions import RedisError
 
 from app.api.auth import router as auth_router
 from app.api.admin import router as admin_router
@@ -46,8 +51,12 @@ settings = get_settings()
 
 # Adiciona cabeçalhos básicos para reduzir riscos no navegador e em proxies.
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Acrescenta cabeçalhos de segurança às respostas HTTP."""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Aplica os cabeçalhos padrão e regras adicionais de produção."""
         response = await call_next(request)
+        # Erros não tratados saem daqui; o 500 é montado pelo middleware externo (achado 164).
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -60,9 +69,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Impede uploads ou payloads excessivos antes que atinjam as rotas.
+# Rejeita antecipadamente requisições cujo Content-Length declarado excede o limite.
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """Rejeita requisições cujo tamanho declarado excede o limite configurado."""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Verifica Content-Length antes de encaminhar a requisição."""
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > settings.max_request_body_bytes:
             return Response("Requisição excede o limite permitido", status_code=413)
@@ -71,21 +83,24 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 # Mede cada requisição e registra um identificador útil para diagnóstico.
 class RequestObservabilityMiddleware(BaseHTTPMiddleware):
-    """Adds a safe correlation id and duration without logging sensitive payloads."""
+    """Registra duração e identificador de correlação sem gravar o payload."""
 
     _request_id_pattern = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
     @classmethod
     def _request_id(cls, request: Request) -> str:
+        """Reutiliza um identificador válido ou cria um identificador novo."""
         candidate = request.headers.get("X-Request-ID", "")
         return candidate if cls._request_id_pattern.fullmatch(candidate) else uuid4().hex
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        """Mede a requisição, adiciona cabeçalhos e registra o resultado."""
         request_id = self._request_id(request)
         started = perf_counter()
         try:
             response = await call_next(request)
         except Exception:
+            # Tracebacks de falhas SQL podem incluir parâmetros; ver achado 163 antes de ampliar este log.
             logger.exception(
                 "Falha não tratada na requisição %s %s (request_id=%s)",
                 request.method,
@@ -109,6 +124,7 @@ class RequestObservabilityMiddleware(BaseHTTPMiddleware):
 
 # Executa a verificação de alertas em modo síncrono dentro do ciclo assíncrono.
 def _run_market_alert_sync() -> tuple[int, int]:
+    """Executa a sincronização de alertas com sessão de banco própria."""
     db = SessionLocal()
     try:
         checked, triggered, changed = sync_all_market_alerts(db)
@@ -124,6 +140,7 @@ def _run_market_alert_sync() -> tuple[int, int]:
 
 # Tarefa periódica que converte cotações atingidas em notificações.
 async def market_alert_monitor() -> None:
+    """Verifica periodicamente cotações e dispara alertas de mercado."""
     interval = max(30, get_settings().market_alert_check_interval_seconds)
     while True:
         try:
@@ -139,6 +156,7 @@ async def market_alert_monitor() -> None:
 
 # Captura o valor da carteira de clientes com posições atualizadas.
 def _run_portfolio_snapshot_capture() -> tuple[int, int, int]:
+    """Captura snapshots usando uma sessão isolada do banco de dados."""
     db = SessionLocal()
     try:
         clients_checked, snapshots_created, failures = capture_all_portfolio_snapshots(db)
@@ -154,6 +172,7 @@ def _run_portfolio_snapshot_capture() -> tuple[int, int, int]:
 
 # Tarefa periódica que preserva a evolução histórica das carteiras.
 async def portfolio_snapshot_monitor() -> None:
+    """Agenda a captura periódica do histórico de valores das carteiras."""
     interval = max(300, get_settings().portfolio_snapshot_interval_seconds)
     while True:
         try:
@@ -174,6 +193,7 @@ async def portfolio_snapshot_monitor() -> None:
 
 # Cria avisos para documentos cujo ciclo anual de revisão venceu.
 def _run_document_review_sync() -> int:
+    """Atualiza avisos de revisão documental para clientes ativos."""
     db = SessionLocal()
     try:
         client_ids = list(
@@ -200,6 +220,7 @@ def _run_document_review_sync() -> int:
 
 # Tarefa periódica de conformidade documental.
 async def document_review_monitor() -> None:
+    """Agenda diariamente a verificação dos prazos de documentos."""
     interval = 24 * 60 * 60
     while True:
         try:
@@ -219,21 +240,31 @@ async def document_review_monitor() -> None:
 @asynccontextmanager
 # Inicia e encerra as tarefas periódicas junto com o processo FastAPI.
 async def lifespan(_: FastAPI):
+    """Inicia os monitores e cancela suas corrotinas ao encerrar a API."""
+    # Cada processo da API inicia uma cópia dos monitores; o Compose de produção usa uma instância.
     monitor_task = asyncio.create_task(market_alert_monitor())
     snapshot_task = asyncio.create_task(portfolio_snapshot_monitor())
     document_review_task = asyncio.create_task(document_review_monitor())
+    logger.info(
+        "Monitores iniciados: alertas a cada %ss, snapshots a cada %ss, revisão documental a cada 24h; mantenha uma instância da API",
+        max(30, get_settings().market_alert_check_interval_seconds),
+        max(300, get_settings().portfolio_snapshot_interval_seconds),
+    )
     try:
         yield
     finally:
+        # O cancelamento da corrotina não interrompe uma função já em execução por asyncio.to_thread.
         monitor_task.cancel()
         snapshot_task.cancel()
         document_review_task.cancel()
+        # Aguarda as corrotinas monitoras; a função de thread pode continuar até terminar.
         await asyncio.gather(
             monitor_task,
             snapshot_task,
             document_review_task,
             return_exceptions=True,
         )
+        logger.info("Monitores da API encerrados")
 
 
 app = FastAPI(
@@ -241,6 +272,7 @@ app = FastAPI(
     description="API da plataforma de organização e acompanhamento patrimonial.",
     version="0.1.0",
     lifespan=lifespan,
+    # Estes endpoints OpenAPI não têm autenticação; a implantação precisa defini-los como desativados.
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
     openapi_url="/openapi.json" if settings.api_docs_enabled else None,
@@ -251,8 +283,11 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(RequestObservabilityMiddleware)
 if settings.environment.strip().lower() in {"production", "prod"}:
+    # O host usado pelo healthcheck local também precisa constar na lista configurada.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=get_trusted_hosts())
 
+# CORS libera origens, métodos e cabeçalhos de entrada; cabeçalhos de resposta
+# personalizados, como os de observabilidade, precisam ser expostos separadamente.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
@@ -283,10 +318,10 @@ app.include_router(investment_transactions_router)
 app.include_router(suitability_router)
 
 
-# Health check simples para confirmar que o processo está vivo.
+# Verificação simples para confirmar que o processo da API está ativo.
 @app.get("/health", tags=["system"])
 def health_check() -> dict[str, str]:
-    """Return the minimum liveness response for local and future deploy checks."""
+    """Confirma que o processo da API está respondendo."""
 
     return {
         "status": "ok",
@@ -296,14 +331,36 @@ def health_check() -> dict[str, str]:
 
 @app.get("/health/ready", tags=["system"])
 def readiness_check(db=Depends(get_db)) -> dict[str, str]:
-    """Verify that the API process and its database are ready for requests."""
-
+    """Confirma o banco e os serviços configurados como obrigatórios."""
     try:
         db.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Banco de dados indisponível") from exc
+    dependency_status = {"database": "ok", "redis": "not_required", "clamav": "not_required"}
+    if settings.redis_required:
+        try:
+            with Redis.from_url(
+                settings.redis_url,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            ) as redis_client:
+                if not redis_client.ping():
+                    raise RedisError("Redis não confirmou a operação PING")
+        except (RedisError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Serviço obrigatório indisponível") from exc
+        dependency_status["redis"] = "ok"
+    if settings.clamav_required:
+        try:
+            with socket.create_connection((settings.clamav_host, settings.clamav_port), timeout=2) as client:
+                client.settimeout(2)
+                client.sendall(b"zPING\0")
+                if client.recv(64).rstrip(b"\0") != b"PONG":
+                    raise OSError("Resposta inesperada do serviço antivírus")
+        except OSError as exc:
+            raise HTTPException(status_code=503, detail="Serviço obrigatório indisponível") from exc
+        dependency_status["clamav"] = "ok"
     return {
         "status": "ready",
         "service": "talentum-api",
-        "database": "ok",
+        **dependency_status,
     }

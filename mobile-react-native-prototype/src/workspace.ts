@@ -1,5 +1,6 @@
 import { ApiError, ClientPermissions, Dashboard, DocumentItem, JsonMap, MarketAlert, NotificationItem, Portfolio, TalentumApi } from './api';
 
+// Reúne os dados carregados em paralelo para as áreas do cliente.
 export type Workspace = {
   dashboard: Dashboard | null;
   portfolio: Portfolio | null;
@@ -19,20 +20,25 @@ export type Workspace = {
   permissions: ClientPermissions | null;
 };
 
+// Valores vazios permitem renderizar as telas antes ou sem resposta da API.
 export const emptyWorkspace: Workspace = {
   dashboard: null, portfolio: null, investmentTransactions: [], monthlyPerformance: null, patrimony: [], goals: [], actionPlan: [],
   documents: [], reports: [], profile: null, financialProfile: null,
   notifications: [], notificationPreferences: {}, suitability: null, marketAlerts: [], permissions: null,
 };
 
+// Mensagens de erro independentes por área do workspace.
 export type WorkspaceErrors = Partial<Record<keyof Workspace, string>>;
+// Indica quais áreas podem usar dados locais durante falhas transitórias.
 export type WorkspaceFallbacks = Partial<Record<keyof Workspace, boolean>>;
 
+/** Carrega as áreas em paralelo e devolve dados parciais, erros e elegibilidade de cache. */
 // Cada módulo pode falhar isoladamente; uma sessão inválida interrompe o acesso inteiro.
 export async function fetchWorkspace(api: TalentumApi, clientId: number) {
   const data: Workspace = { ...emptyWorkspace };
   const errors: WorkspaceErrors = {};
   const fallbackEligible: WorkspaceFallbacks = {};
+  // Busca uma seção do workspace e registra erros ou elegibilidade de cache.
   async function load<K extends keyof Workspace>(key: K, request: () => Promise<Workspace[K]>) {
     try {
       data[key] = await request();

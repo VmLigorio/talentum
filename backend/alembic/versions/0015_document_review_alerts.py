@@ -7,6 +7,7 @@ Revision ID: 0015_document_review_alerts
 Revises: 0014_profile_documents
 Create Date: 2026-09-20
 """
+# Finalidade: Adiciona a preferência para avisos de revisão anual de documentos.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Adiciona a preferência para avisos de revisão anual de documentos."""
+    # Ativa o aviso para usuários atuais e futuros por padrão; a preferência
+    # pode ser desativada individualmente pelo titular da conta.
     op.add_column(
         "notification_preferences",
         sa.Column(
@@ -33,4 +37,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # A reversão remove a configuração de aviso de revisão anual.
     op.drop_column("notification_preferences", "document_review_due")

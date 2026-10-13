@@ -11,6 +11,8 @@ from app.db.database import Base
 
 
 class InvestmentPosition(Base):
+    """Saldo consolidado de um ativo mantido na carteira do cliente."""
+
     __tablename__ = "investment_positions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

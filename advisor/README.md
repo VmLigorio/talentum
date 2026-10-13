@@ -4,7 +4,7 @@ Painel web local para administradores e consultores.
 
 ## Executar
 
-Com a API rodando em `127.0.0.1:8000`, inicie um servidor estático nesta pasta:
+Com a API disponível na URL definida em `talentum-api-url` (por padrão, `http://127.0.0.1:8001`), inicie um servidor estático nesta pasta:
 
 ```bash
 cd advisor
@@ -12,6 +12,11 @@ python3 -m http.server 8080
 ```
 
 Abra <http://127.0.0.1:8080> e entre com um usuário `admin` ou `advisor` criado no backend.
+
+O endereço da API fica definido no `meta` `talentum-api-url` em `index.html`. Para homologação e
+produção, configure ali a URL HTTPS do ambiente. O painel ignora parâmetros `?api=` da URL, para
+que um link não possa redirecionar credenciais e tokens para outro servidor. HTTP é aceito apenas
+para `localhost` durante o desenvolvimento local.
 
 O painel consome a mesma API do Mobile e permite consultar clientes, dashboard, permissões, publicar relatórios e pesquisar investimentos da B3 e do mercado internacional.
 

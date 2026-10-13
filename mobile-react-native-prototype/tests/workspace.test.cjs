@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { harness, response } = require('./helpers.cjs');
 
+// Prepara API, cache e callbacks controlados para testar o carregamento do workspace.
+// Prepara respostas padrão dos módulos e uma API simulada para cada cenário.
 function setup() {
   const context = harness(async () => { throw new Error('Unexpected fetch'); });
   const mockApi = Object.fromEntries(Object.keys(context.emptyWorkspace).map((key) => [key, async () => {
@@ -13,6 +15,7 @@ function setup() {
   return { ...context, mockApi };
 }
 
+// Garante que falha da carteira não impeça o carregamento das demais áreas.
 test('carteira indisponível não bloqueia os outros módulos', async () => {
   const { mockApi, ApiError, fetchWorkspace } = setup();
   mockApi.portfolio = async () => { throw new ApiError('Indisponível', 503); };
@@ -26,6 +29,7 @@ test('carteira indisponível não bloqueia os outros módulos', async () => {
   assert.deepEqual(Object.keys(errors), ['portfolio']);
 });
 
+// Confirma que falhas de módulos opcionais apareçam como erros identificáveis.
 test('módulos antes silenciados exibem erro em vez de ausência de dados', async () => {
   const { mockApi, ApiError, fetchWorkspace } = setup();
   const failed = ['notifications', 'notificationPreferences', 'suitability', 'marketAlerts'];
@@ -34,6 +38,7 @@ test('módulos antes silenciados exibem erro em vez de ausência de dados', asyn
   assert.deepEqual(Object.keys(errors).sort(), failed.sort());
 });
 
+// Distingue falta de autorização de indisponibilidade sem interromper o app.
 test('permissão negada é distinta de indisponibilidade e não bloqueia o app', async () => {
   const { mockApi, ApiError, fetchWorkspace } = setup();
   mockApi.documents = async () => { throw new ApiError('Proibido', 403); };
@@ -42,6 +47,7 @@ test('permissão negada é distinta de indisponibilidade e não bloqueia o app',
   assert.deepEqual(data.goals, [{ id: 1 }]);
 });
 
+// Garante que expiração da sessão encerre o carregamento em qualquer módulo.
 test('401 em qualquer módulo interrompe o acesso, incluindo módulos opcionais', async () => {
   const { mockApi, ApiError, fetchWorkspace, emptyWorkspace } = setup();
   for (const key of Object.keys(emptyWorkspace)) {
@@ -51,6 +57,7 @@ test('401 em qualquer módulo interrompe o acesso, incluindo módulos opcionais'
   }
 });
 
+// Verifica que nova tentativa bem-sucedida limpe o erro anterior do módulo.
 test('nova atualização limpa o erro anterior e recupera o módulo', async () => {
   const { mockApi, ApiError, fetchWorkspace } = setup();
   mockApi.documents = async () => { throw new ApiError('Offline', 0); };
@@ -61,6 +68,7 @@ test('nova atualização limpa o erro anterior e recupera o módulo', async () =
   assert.deepEqual(recovered.data.documents, [{ id: 7 }]);
 });
 
+// Preserva estados vazios legítimos sem classificá-los como falhas de API.
 test('um resultado vazio legítimo não recebe aviso de falha', async () => {
   const { api, fetchWorkspace } = harness(async (url) => {
     if (url.endsWith('/suitability') || url.endsWith('/financial-profile')) return response(404, {});

@@ -20,12 +20,18 @@ Integrações bancárias, cotações em tempo real, IA, home broker, pagamentos 
 
 ```text
 talentum/
-├── backend/   API FastAPI e domínio do produto
-├── mobile/    aplicativo Flutter do cliente
-├── advisor/   painel web do Advisor
-├── docs/      decisões e documentação do produto
+├── backend/                         API FastAPI, regras de negócio e migrations
+├── mobile/                          aplicativo Flutter do cliente
+├── mobile-react-native-prototype/   protótipo React Native/Expo, separado do app Flutter
+├── advisor/                         painel web estático (HTML, CSS e JavaScript)
+├── docs/                            escopo, decisões, aceitação e revisão
 └── README.md
 ```
+
+O Flutter em `mobile/` é o aplicativo móvel principal descrito no plano do MVP. O projeto em
+`mobile-react-native-prototype/` é um protótipo separado e não deve ser confundido com a versão
+Flutter usada nas instruções de instalação e validação do piloto. O painel Advisor é servido como
+arquivos estáticos HTML, CSS e JavaScript e consome a API.
 
 ## Backend
 
@@ -198,6 +204,17 @@ Os testes de integração de autorização usam PostgreSQL e exigem `TEST_DATABA
 
 ## Status do MVP
 
-O backend, o painel Advisor e o aplicativo Mobile já estão integrados para o fluxo do cliente:
-login, dashboard, patrimônio, metas, plano de ação, relatórios, documentos e alertas. A lista
-de recursos fora do MVP continua em `docs/mvp-v0.1.md`.
+O repositório contém backend, painel Advisor e app Flutter com fluxos implementados para login,
+dashboard, patrimônio, metas, plano de ação, carteira, suitability, relatórios, documentos e
+alertas. A presença do código não significa que todos esses fluxos foram validados de ponta a
+ponta: consulte a [matriz de aceitação](docs/phase-9-acceptance-matrix.md) para as evidências e
+pendências de testes.
+
+A revisão estática do código está concluída e seus riscos estão registrados em
+[docs/revisao-do-codigo.md](docs/revisao-do-codigo.md). Essa revisão não executou testes, builds,
+chamadas a serviços externos nem validação visual em dispositivos. A decisão atual da fase 9
+permite somente ensaios internos com dados fictícios; o piloto com participantes e dados
+financeiros reais continua bloqueado até o fechamento dos itens P0 em
+[docs/phase-9-decision.md](docs/phase-9-decision.md).
+
+O escopo do primeiro ciclo e os itens explicitamente adiados estão em [docs/mvp-v0.1.md](docs/mvp-v0.1.md).

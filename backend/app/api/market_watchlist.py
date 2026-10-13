@@ -19,6 +19,7 @@ router = APIRouter(prefix="/market/watchlist", tags=["market-watchlist"])
 
 
 def _find_client(client_id: int, db: Session) -> User:
+    """Busca uma conta de cliente ou retorna erro 404."""
     client = db.scalar(select(User).where(User.id == client_id, User.role == "client"))
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -26,6 +27,7 @@ def _find_client(client_id: int, db: Session) -> User:
 
 
 def _resolve_client_id(requested_client_id: int | None, current_user: User, db: Session) -> int:
+    """Escolhe o cliente da operação e confirma que o usuário pode acessá-lo."""
     client_id = current_user.id if current_user.role == "client" else requested_client_id
     if client_id is None:
         raise HTTPException(status_code=400, detail="Informe o cliente da lista de acompanhamento")
@@ -35,11 +37,13 @@ def _resolve_client_id(requested_client_id: int | None, current_user: User, db: 
 
 
 def _response(item: MarketWatchlistItem, db: Session, service: MarketDataService) -> MarketWatchlistResponse:
+    """Combina o item salvo com detalhes de mercado, se estiverem disponíveis."""
     client = db.get(User, item.client_id)
     name = None
     price = None
     currency = None
     source = None
+    # Falhas HTTP/ValueError omitem a cotação; AttributeError de payload malformado ainda escapa (achado 75).
     try:
         instrument = service.details(item.symbol, item.market)
         name = instrument.name
@@ -71,6 +75,7 @@ def list_market_watchlist(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[MarketWatchlistResponse]:
+    """Lista ativos acompanhados pelo cliente com cotações disponíveis."""
     resolved_client_id = _resolve_client_id(client_id, current_user, db)
     items = db.scalars(
         select(MarketWatchlistItem)
@@ -78,7 +83,7 @@ def list_market_watchlist(
         .order_by(MarketWatchlistItem.created_at.desc())
     ).all()
     service = MarketDataService()
-    return [_response(item, db, service) for item in items]
+    return [_response(item, db, service) for item in items]  # Enriquece sequencialmente cada item; símbolos sem cache somam chamadas ao provedor.
 
 
 @router.post("", response_model=MarketWatchlistResponse, status_code=status.HTTP_201_CREATED)
@@ -87,7 +92,9 @@ def create_market_watchlist_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MarketWatchlistResponse:
+    """Adiciona um ativo à lista e trata duplicatas como conflito."""
     client_id = _resolve_client_id(payload.client_id, current_user, db)
+    # O tamanho é validado antes deste strip; entrada direta com espaços pode persistir símbolo vazio (achado 67).
     item = MarketWatchlistItem(
         client_id=client_id,
         created_by_user_id=current_user.id,
@@ -105,14 +112,15 @@ def create_market_watchlist_item(
                 action="create",
                 resource="market_watchlist",
                 resource_id=str(item.id),
-                details={"symbol": item.symbol, "market": item.market},
             )
         )
         db.commit()
+    # O bloco inclui item e auditoria; qualquer IntegrityError é apresentado como duplicidade (achado 195).
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="Este ativo já está na lista do cliente") from exc
     db.refresh(item)
+    # A cotação é consultada após o commit; falha estrutural pode ocultar que a inclusão já foi salva (achado 28).
     return _response(item, db, MarketDataService())
 
 
@@ -122,10 +130,12 @@ def remove_market_watchlist_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MarketWatchlistResponse:
+    """Remove um ativo acompanhado após confirmar autorização."""
     item = db.get(MarketWatchlistItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Ativo não encontrado na lista")
     require_client_manager(item.client_id, current_user, db)
+    # Monta a resposta antes de remover para devolver os dados do item excluído.
     response = _response(item, db, MarketDataService())
     db.add(
         AuditLog(

@@ -17,10 +17,12 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
 def get_or_create_preferences(user_id: int, db: Session) -> NotificationPreference:
+    """Obtém preferências existentes ou cria os valores padrão do usuário."""
     preferences = db.get(NotificationPreference, user_id)
     if preferences is None:
         preferences = NotificationPreference(user_id=user_id)
         db.add(preferences)
+        # A inserção não trata conflito se outra requisição criar a mesma chave primeiro (achado 51).
         db.commit()
         db.refresh(preferences)
     return preferences
@@ -31,6 +33,7 @@ def get_preferences(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> NotificationPreference:
+    """Retorna preferências atuais, inicializando-as se necessário."""
     return get_or_create_preferences(current_user.id, db)
 
 
@@ -40,8 +43,9 @@ def update_preferences(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> NotificationPreference:
+    """Atualiza preferências informadas e audita alterações efetivas."""
     preferences = get_or_create_preferences(current_user.id, db)
-    changes = payload.model_dump(exclude_unset=True)
+    changes = payload.model_dump(exclude_unset=True)  # Campos omitidos não mudam; null explícito ainda pode violar NOT NULL (achado 50).
     for field, value in changes.items():
         setattr(preferences, field, value)
     if changes:
@@ -52,7 +56,6 @@ def update_preferences(
                 action="update",
                 resource="notification_preferences",
                 resource_id=str(current_user.id),
-                details=changes,
             )
         )
     db.commit()

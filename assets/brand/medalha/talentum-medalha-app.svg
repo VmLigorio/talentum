@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Talentum — medalha</title>
+  <desc id="desc">Medalha de prata com centro violeta, um T em forma de cruz gravada e um halo discreto.</desc>
+  <defs>
+    <linearGradient id="silver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8F9FB"/>
+      <stop offset="0.48" stop-color="#D8DCE5"/>
+      <stop offset="1" stop-color="#BFC5D1"/>
+    </linearGradient>
+    <linearGradient id="silver-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D9DCE8"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6453C7"/>
+      <stop offset="1" stop-color="#5040AC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Face prateada e anéis incisos: o contorno sustenta o símbolo em tamanhos pequenos. -->
+  <circle cx="128" cy="128" r="106" fill="url(#silver)" stroke="#A4ABBA" stroke-width="2"/>
+  <circle cx="128" cy="128" r="98" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+  <circle cx="128" cy="128" r="90" fill="none" stroke="#9DA5B6" stroke-width="1.5"/>
+  <circle cx="128" cy="128" r="82" fill="#E9EBF1" stroke="#FAFBFD" stroke-width="2"/>
+  <circle cx="128" cy="128" r="72" fill="url(#violet)" stroke="#48379F" stroke-width="2"/>
+
+  <!-- Halo e luz gravados na face violeta. -->
+  <circle cx="128" cy="117" r="39" fill="none" stroke="#AFA5E9" stroke-width="2.5"/>
+  <path d="M83 88l-7-7m97 7 7-7M83 166l-7 7m97-7 7 7" fill="none" stroke="#BDB5ED" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Cruz Tau: o T de Talentum assume um sinal católico simples e legível. -->
+  <path d="M91 99h74v18h-28v71h-18v-71H91z" fill="url(#silver-mark)" stroke="#E7E9F0" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="128" cy="108" r="5" fill="#1A9D91"/>
+</svg>

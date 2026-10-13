@@ -28,6 +28,7 @@ CENT = Decimal("0.01")
 
 
 def _historical_return(service: MarketDataService, symbol: str, market: str, period: MarketPeriod) -> Decimal | None:
+    """Calcula retorno entre primeiros e últimos fechamentos válidos do período."""
     try:
         history = service.history(symbol, market, period)
     except (httpx.HTTPError, ValueError):
@@ -35,6 +36,7 @@ def _historical_return(service: MarketDataService, symbol: str, market: str, per
     points = [point for point in history.points if point.close is not None]
     if len(points) < 2 or not points[0].close:
         return None
+    # O histórico externo ainda pode conter NaN/infinito; a validação ausente está no achado 17.
     return ((Decimal(str(points[-1].close)) / Decimal(str(points[0].close)) - 1) * 100).quantize(CENT, rounding=ROUND_HALF_UP)
 
 
@@ -45,6 +47,7 @@ def investment_analytics(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> InvestmentAnalyticsResponse:
+    """Compara retornos por ativo/moeda e sinaliza cotação ausente ou concentração."""
     _find_client(client_id, db)
     require_client_manager(client_id, current_user, db)
     items = _load_positions(client_id, db)
@@ -62,6 +65,7 @@ def investment_analytics(
             current_by_currency[currency] = current_by_currency.get(currency, Decimal("0")) + current
         raw.append({"item": item, "currency": currency, "invested": invested, "current": current})
 
+    # Calcula peso e contribuição de cada ativo sem conversão entre moedas.
     positions: list[InvestmentAnalyticsPosition] = []
     summary_acc: dict[str, dict[str, Decimal | int]] = {}
     for entry in raw:
@@ -71,13 +75,16 @@ def investment_analytics(
         current = entry["current"]
         period_return = _historical_return(service, item.symbol, item.market, period)
         allocation = (current / current_by_currency[currency] * 100).quantize(CENT, rounding=ROUND_HALF_UP) if current is not None and current_by_currency.get(currency) else Decimal("0")
+        # A contribuição usa o retorno integral do período ponderado pelo custo registrado, sem datas de compra.
         contribution = (period_return * (invested / invested_by_currency[currency]) if period_return is not None and invested_by_currency.get(currency) else None)
         if contribution is not None:
             contribution = contribution.quantize(CENT, rounding=ROUND_HALF_UP)
         summary = summary_acc.setdefault(currency, {"invested": Decimal("0"), "weighted_return": Decimal("0"), "priced_count": 0, "top": Decimal("0")})
         summary["invested"] += invested
         if period_return is not None:
+            # A ponderação usa o custo de toda a moeda, mas só soma ativos com série; a lacuna pode reduzir o resumo (achado 143).
             summary["weighted_return"] += contribution or Decimal("0")
+            # Esta contagem acompanha retornos históricos disponíveis, não cotações atuais.
             summary["priced_count"] += 1
         summary["top"] = max(summary["top"], allocation)
         positions.append(InvestmentAnalyticsPosition(id=item.id, symbol=item.symbol, market=item.market, currency=currency, invested_value=invested, current_value=current, allocation_percent=allocation, period_return_percent=period_return, contribution_percent=contribution, data_available=period_return is not None))
@@ -85,11 +92,13 @@ def investment_analytics(
     summaries = [InvestmentAnalyticsCurrencySummary(currency=currency, invested_total=data["invested"], priced_position_count=data["priced_count"], portfolio_return_percent=data["weighted_return"].quantize(CENT, rounding=ROUND_HALF_UP) if data["priced_count"] else None, top_concentration_percent=data["top"]) for currency, data in sorted(summary_acc.items())]
     benchmarks: list[InvestmentBenchmark] = []
     markets = {item.market for item in items}
+    # Inclui somente os índices dos mercados presentes na carteira do cliente.
     for market, symbol, label in [("br", "^BVSP", "Ibovespa"), ("global", "^GSPC", "S&P 500")]:
         if market in markets:
             result = _historical_return(service, symbol, market, period)
             benchmarks.append(InvestmentBenchmark(market=market, symbol=symbol, label=label, return_percent=result, data_available=result is not None))
     risk_flags: list[str] = []
+    # Os avisos descrevem disponibilidade de cotação, concentração e separação monetária.
     if any(entry["current"] is None for entry in raw):
         risk_flags.append("Existem posições sem cotação atual disponível.")
     if any(summary.top_concentration_percent > 40 for summary in summaries):

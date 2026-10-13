@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { harness, response, deferred, sessionStore } = require('./helpers.cjs');
 
+// Garante que chamadas simultâneas compartilhem uma única renovação de token.
 test('requisições paralelas com 401 compartilham uma única renovação', async () => {
   const refreshStarted = deferred();
   const releaseRefresh = deferred();
@@ -26,6 +27,7 @@ test('requisições paralelas com 401 compartilham uma única renovação', asyn
   assert.equal(store.get('talentum_prototype_refresh_token'), 'new-refresh');
 });
 
+// Evita uma segunda renovação quando chega atrasada uma resposta 401 antiga.
 test('401 atrasado reutiliza o token já renovado', async () => {
   const delayed = deferred();
   let oldCalls = 0;
@@ -48,6 +50,7 @@ test('401 atrasado reutiliza o token já renovado', async () => {
   assert.equal(refreshes, 1);
 });
 
+// Exercita falhas de rede e indisponibilidade sem apagar uma sessão recuperável.
 for (const status of [0, 503]) {
   test(`falha temporária ${status} ao renovar preserva a sessão e permite tentar novamente`, async () => {
     let unavailable = true;
@@ -69,6 +72,7 @@ for (const status of [0, 503]) {
   });
 }
 
+// Confirma a limpeza local após rejeição e evita avisos duplicados de expiração.
 test('refresh rejeitado limpa os tokens e notifica a tela uma única vez', async () => {
   let expired = 0;
   const { api, store } = harness(async () => response(401, {}), sessionStore());
@@ -80,6 +84,7 @@ test('refresh rejeitado limpa os tokens e notifica a tela uma única vez', async
   assert.equal(expired, 1);
 });
 
+// Impede repetição infinita de refresh quando a credencial nova também falha.
 test('401 após uma renovação não entra em loop e encerra a sessão', async () => {
   let refreshes = 0;
   const { api, store } = harness(async (url) => {
@@ -95,6 +100,7 @@ test('401 após uma renovação não entra em loop e encerra a sessão', async (
   assert.equal(store.size, 0);
 });
 
+// Garante que o logout prevaleça sobre uma renovação que ainda está pendente.
 test('logout durante refresh impede que a resposta restaure a sessão', async () => {
   const started = deferred();
   const finish = deferred();
@@ -116,6 +122,7 @@ test('logout durante refresh impede que a resposta restaure a sessão', async ()
   assert.equal(await api.restoreSession(), false);
 });
 
+// Confirma que logout espera gravações em curso antes de remover as credenciais.
 test('logout aguarda uma gravação já iniciada e remove todos os tokens', async () => {
   const started = deferred();
   const finish = deferred();
@@ -137,6 +144,7 @@ test('logout aguarda uma gravação já iniciada e remove todos os tokens', asyn
   assert.equal(store.size, 0);
 });
 
+// Evita que uma resposta da conta anterior altere a sessão recém-iniciada.
 test('resposta da conta anterior não interfere no novo login', async () => {
   const delayed = deferred();
   const { api, store } = harness(async (url) => {
@@ -152,6 +160,7 @@ test('resposta da conta anterior não interfere no novo login', async () => {
   assert.equal(store.get('talentum_prototype_refresh_token'), 'other-refresh');
 });
 
+// Distingue respostas vazias válidas de respostas com conteúdo inválido.
 test('JSON inválido não vira módulo vazio; null e 204 continuam válidos', async () => {
   const { api } = harness(async (url) => {
     if (url.endsWith('/read-all')) return response(204);
@@ -163,6 +172,7 @@ test('JSON inválido não vira módulo vazio; null e 204 continuam válidos', as
   await api.markAllNotificationsRead();
 });
 
+// Verifica o timeout de rede sem invalidar a sessão que poderá ser reutilizada.
 test('requisição sem resposta tem prazo e mantém a sessão para nova tentativa', async () => {
   let expire;
   let cleared = false;

@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { harness, response, sessionStore } = require('./helpers.cjs');
 
+// Confere os dados de contexto e as respostas enviados pelo fluxo de suitability.
 test('suitability envia versão financeira confirmada e respostas do cliente', async () => {
   const requests = [];
   const { api } = harness(async (url, init) => {
@@ -24,6 +25,7 @@ test('suitability envia versão financeira confirmada e respostas do cliente', a
   });
 });
 
+// Verifica os caminhos autenticados usados para permissões, patrimônio e metas.
 test('permissões do cliente e mudanças de patrimônio/metas usam os endpoints protegidos', async () => {
   const requests = [];
   const { api } = harness(async (url, init) => {
@@ -41,6 +43,7 @@ test('permissões do cliente e mudanças de patrimônio/metas usam os endpoints 
   assert.equal(requests[2].url.endsWith('/clients/8/patrimony/4'), true);
 });
 
+// Garante autenticação do download e persistência do arquivo em cache local.
 test('download de documento usa sessão autenticada e grava bytes no cache em base64', async () => {
   let sentAuthorization;
   const store = sessionStore();

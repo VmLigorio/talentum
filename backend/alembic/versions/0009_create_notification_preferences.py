@@ -7,6 +7,7 @@ Revision ID: 0009_notification_prefs
 Revises: 0008_create_notifications
 Create Date: 2026-09-18
 """
+# Finalidade: Cria preferências de recebimento de cada tipo de notificação.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria preferências de recebimento de cada tipo de notificação."""
+    # Mantém uma configuração por usuário e habilita cada tipo de aviso por padrão.
     op.create_table(
         "notification_preferences",
         sa.Column("user_id", sa.Integer(), nullable=False),
@@ -35,4 +38,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
     op.drop_table("notification_preferences")

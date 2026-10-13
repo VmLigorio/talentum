@@ -12,12 +12,16 @@ MarketPeriod = Literal["1mo", "3mo", "6mo", "1y", "5y"]
 
 
 class MarketReference(BaseModel):
+    """Indicador de mercado usado como referência de desempenho."""
+
     label: str
     url: str
     source: str
 
 
 class FiiReportSummary(BaseModel):
+    """Resumo público de indicadores disponíveis para um fundo imobiliário."""
+
     reference_date: datetime | None = None
     total_assets: float | None = None
     equity: float | None = None
@@ -43,6 +47,8 @@ class FiiReportSummary(BaseModel):
 
 
 class MarketInstrument(BaseModel):
+    """Instrumento financeiro e seus dados de identificação de mercado."""
+
     market: Literal["br", "global"]
     symbol: str
     name: str
@@ -82,6 +88,8 @@ class MarketInstrument(BaseModel):
 
 
 class MarketSearchResponse(BaseModel):
+    """Resultados pagináveis da pesquisa de ativos."""
+
     query: str = Field(min_length=1)
     market: MarketRegion
     fetched_at: datetime
@@ -90,6 +98,8 @@ class MarketSearchResponse(BaseModel):
 
 
 class MarketHistoryPoint(BaseModel):
+    """Cotação e retorno de um ativo em uma data específica."""
+
     date: datetime
     open: float | None = None
     high: float | None = None
@@ -100,6 +110,8 @@ class MarketHistoryPoint(BaseModel):
 
 
 class MarketHistoryResponse(BaseModel):
+    """Série histórica de preços acompanhada de metadados do ativo."""
+
     symbol: str
     market: Literal["br", "global"]
     period: MarketPeriod

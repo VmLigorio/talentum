@@ -24,10 +24,12 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 @router.get("", response_model=list[NotificationResponse])
 def list_notifications(
     unread_only: bool = Query(default=False),
+    # A lista é limitada; a contagem total usa o endpoint /unread-count.
     limit: int = Query(default=50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Notification]:
+    """Sincroniza avisos aplicáveis e retorna notificações recentes."""
     if current_user.role == "client":
         changed = sync_overdue_notifications(current_user.id, db)
         changed = sync_document_review_notifications(current_user.id, db) or changed
@@ -36,12 +38,13 @@ def list_notifications(
     _, _, market_alerts_changed = sync_market_alerts_for_user(current_user, db)
     if market_alerts_changed:
         db.commit()
+    # O escopo atual é o destinatário; não revalida o vínculo do Advisor com cada cliente notificado.
     query = select(Notification).where(Notification.user_id == current_user.id)
     if unread_only:
         query = query.where(Notification.read_at.is_(None))
     return list(
         db.scalars(
-            query.order_by(Notification.read_at.is_not(None), Notification.created_at.desc()).limit(limit)
+            query.order_by(Notification.read_at.is_not(None), Notification.created_at.desc()).limit(limit)  # Não lidas primeiro; dentro de cada grupo, mais recentes antes.
         ).all()
     )
 
@@ -51,6 +54,8 @@ def unread_notification_count(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
+    """Conta notificações ainda não lidas pelo usuário autenticado."""
+    # A contagem também considera todos os avisos do destinatário, inclusive vínculos já encerrados.
     count = db.scalar(
         select(func.count(Notification.id)).where(
             Notification.user_id == current_user.id,
@@ -65,7 +70,8 @@ def mark_all_notifications_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    db.execute(
+    """Marca como lidas todas as notificações pendentes do usuário."""
+    db.execute(  # O lote inclui avisos do destinatário ligados a vínculos já encerrados (achado 93).
         update(Notification)
         .where(Notification.user_id == current_user.id, Notification.read_at.is_(None))
         .values(read_at=datetime.now(timezone.utc))
@@ -79,6 +85,7 @@ def mark_notification_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Notification:
+    """Marca uma notificação própria como lida e devolve seu estado."""
     notification = db.scalar(
         select(Notification).where(
             Notification.id == notification_id,
