@@ -22,8 +22,11 @@ void main() {
         ),
       ),
     );
+    await tester.pump(const Duration(milliseconds: 901));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Sua jornada financeira começa aqui.'), findsOneWidget);
+    expect(find.text('Seu patrimônio, acompanhado com clareza.'), findsOneWidget);
+    expect(find.text('Acesse sua conta'), findsOneWidget);
     expect(find.text('Entrar'), findsOneWidget);
   });
 
@@ -41,6 +44,8 @@ void main() {
         ),
       ),
     );
+    await tester.pump(const Duration(milliseconds: 901));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Entrar'));
     await tester.pump();
