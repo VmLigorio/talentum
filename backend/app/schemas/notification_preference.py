@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class NotificationPreferenceResponse(BaseModel):
+    """Preferências atuais de envio de notificações do usuário."""
+
     model_config = ConfigDict(from_attributes=True)
 
     user_id: int
@@ -18,6 +20,9 @@ class NotificationPreferenceResponse(BaseModel):
 
 
 class NotificationPreferenceUpdate(BaseModel):
+    """Preferências que o usuário deseja alterar."""
+
+    # O schema aceita null explícito, embora as colunas do modelo sejam NOT NULL (achado 50).
     action_overdue: bool | None = None
     action_due_soon: bool | None = None
     goal_overdue: bool | None = None

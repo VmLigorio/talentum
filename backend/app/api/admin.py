@@ -26,6 +26,7 @@ def list_users(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> list[User]:
+    """Lista contas e, quando informado, filtra pelo papel validado."""
     query = select(User).order_by(User.name)
     if role is not None:
         if role not in {"admin", "advisor", "client"}:
@@ -40,6 +41,8 @@ def create_user(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> User:
+    """Cria uma conta e prepara perfil e permissões se for cliente."""
+    # Pré-consulta melhora a mensagem sequencial; a unicidade do banco protege chamadas concorrentes.
     if db.scalar(select(User).where(User.email == payload.email)) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -53,6 +56,7 @@ def create_user(
         role=payload.role,
     )
     db.add(user)
+    # Gera o identificador antes de criar os registros dependentes do cliente.
     db.flush()
     if payload.role == "client":
         db.add(ClientProfile(user_id=user.id))
@@ -65,7 +69,6 @@ def create_user(
             action="create",
             resource="user",
             resource_id=str(user.id),
-            details={"role": payload.role},
         )
     )
     db.commit()
@@ -80,6 +83,7 @@ def update_user_status(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> User:
+    """Ativa ou desativa uma conta e encerra suas sessões ao desativá-la."""
     if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -89,8 +93,10 @@ def update_user_status(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
 
+    # O acesso muda na conta; ClientProfile.status não é sincronizado por esta rota.
     user.is_active = payload.is_active
     if not payload.is_active:
+        # O incremento invalida tokens de acesso; a atualização abaixo revoga os refresh tokens.
         user.session_version += 1
         db.execute(
             update(UserSession)
@@ -104,7 +110,6 @@ def update_user_status(
             action="update",
             resource="user_status",
             resource_id=str(user.id),
-            details={"is_active": payload.is_active},
         )
     )
     db.commit()
@@ -119,6 +124,7 @@ def reset_user_password(
     current_user: User = Depends(require_roles("admin")),
     db: Session = Depends(get_db),
 ) -> User:
+    """Redefine a senha da conta e invalida todas as sessões existentes."""
     if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -129,6 +135,7 @@ def reset_user_password(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado")
     user.password_hash = hash_password(payload.new_password)
     user.session_version += 1
+    # Atualiza a versão e revoga refresh tokens na mesma transação da troca de senha.
     db.execute(
         update(UserSession)
         .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
@@ -141,7 +148,6 @@ def reset_user_password(
             action="change_password",
             resource="user",
             resource_id=str(user.id),
-            details={"reset_by_admin": True},
         )
     )
     db.commit()

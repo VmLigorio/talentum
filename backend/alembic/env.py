@@ -17,11 +17,14 @@ settings = get_settings()
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Escapa percentuais porque o ConfigParser do Alembic interpreta `%` como interpolação.
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+# Permite ao Alembic comparar os modelos registrados com o esquema do banco ao gerar revisões.
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Gera instruções de migração sem abrir uma conexão com o banco."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -36,10 +39,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Executa migrações usando uma conexão ativa configurada pelo Alembic."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+        poolclass=pool.NullPool,  # O comando de migração usa conexões pontuais, sem manter pool entre execuções.
     )
 
     with connectable.connect() as connection:

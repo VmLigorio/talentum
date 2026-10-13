@@ -12,6 +12,7 @@ from app.models import ClientPermission, ClientProfile, User
 
 
 def parse_args() -> argparse.Namespace:
+    """Lê os dados obrigatórios para criar a conta inicial."""
     parser = argparse.ArgumentParser(description="Cria um usuário inicial do Talentum")
     parser.add_argument("--name", required=True)
     parser.add_argument("--email", required=True)
@@ -24,12 +25,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Confirma uma senha e cria uma conta administrativa ou de equipe."""
     args = parse_args()
     email = args.email.strip().lower()
     password = getpass("Senha (não será exibida): ")
     confirmation = getpass("Confirme a senha: ")
 
-    if len(password) < 8:
+    if len(password) < 8:  # O CLI não impõe o máximo de 128 aceito pela API (achado 133).
         raise SystemExit("A senha precisa ter pelo menos 8 caracteres.")
     if password != confirmation:
         raise SystemExit("As senhas não conferem.")
@@ -46,6 +48,7 @@ def main() -> None:
         )
         db.add(user)
         db.flush()
+        # Inicializa os vínculos exigidos pelas rotas que atendem contas de cliente.
         if args.role == "client":
             db.add(ClientProfile(user_id=user.id))
             db.add(ClientPermission(client_id=user.id))

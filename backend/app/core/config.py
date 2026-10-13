@@ -1,5 +1,5 @@
 # Talentum — backend/app/core/config.py
-# Responsabilidade: Centraliza configuração, autenticação, autorização e controles transversais da API.
+# Responsabilidade: Carrega variáveis de ambiente e valida os requisitos de execução da API.
 # Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 from functools import lru_cache
 
@@ -8,34 +8,50 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Configurações da API carregadas de variáveis de ambiente e .env."""
+
+    # Ambiente, banco, tokens e origens permitidas para chamadas web.
     environment: str = "development"
     database_url: str = (
         "postgresql+psycopg://talentum_user:change-me@localhost:5432/talentum"
     )
     jwt_secret: str = "change-me-with-a-long-random-secret"
+    # Prazos consumidos diretamente pela emissão; devem ser maiores que zero.
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
     cors_origins: str = "http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:8080,http://localhost:8080"
+    # Diretório-base onde o backend armazena arquivos recebidos dos usuários.
     storage_dir: str = "storage"
+
+    # Provedores externos e parâmetros de repetição/cache dos dados de mercado.
     brapi_base_url: str = "https://brapi.dev"
     brapi_token: str | None = None
     yahoo_finance_base_url: str = "https://query1.finance.yahoo.com"
+    # Aplicado diretamente ao HTTPX; Settings ainda aceita zero (achado 162).
     market_data_timeout_seconds: float = 8.0
     market_retry_attempts: int = 1
     market_cache_ttl_seconds: int = 60
+    # Período solicitado entre verificações automáticas; o worker aplica um piso mínimo.
     market_alert_check_interval_seconds: int = 300
+    # Período solicitado entre capturas de snapshots; o worker aplica um piso mínimo.
     portfolio_snapshot_interval_seconds: int = 3600
+
+    # Controles contra abuso de login e requisições grandes.
     login_rate_limit_attempts: int = 5
     login_rate_limit_window_seconds: int = 300
     max_request_body_bytes: int = 12 * 1024 * 1024
     trusted_hosts: str = "127.0.0.1,localhost,testserver"
+    # O padrão mantém a documentação ativa; produção precisa definir false explicitamente (achado 151).
     api_docs_enabled: bool = True
+
+    # Serviços de apoio opcionais ou obrigatórios, conforme o ambiente.
     redis_url: str | None = None
     redis_required: bool = False
     clamav_host: str | None = None
     clamav_port: int = 3310
     clamav_required: bool = False
 
+    # Define o arquivo local de desenvolvimento e ignora chaves de ambiente alheias à API.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -44,13 +60,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
+        """Rejeita limites inválidos e padrões inseguros em produção."""
         environment = self.environment.strip().lower()
+        # A validação ainda não rejeita prazos de token nem timeout de mercado não positivos (achados 124 e 162).
         if self.login_rate_limit_attempts < 1 or self.login_rate_limit_window_seconds < 1:
             raise ValueError("Os limites de login precisam ser positivos")
         if self.market_retry_attempts < 0 or self.market_cache_ttl_seconds < 0:
             raise ValueError("As configurações de resiliência de mercado não podem ser negativas")
         if self.max_request_body_bytes < 1024 * 1024:
             raise ValueError("O limite de requisição precisa ser de pelo menos 1 MB")
+        # Exige valores mais restritivos quando a API é iniciada em ambiente produtivo.
         if environment in {"production", "prod"}:
             if len(self.jwt_secret) < 32 or any(marker in self.jwt_secret for marker in ("change-me", "GERE_UM", "COLOQUE")):
                 raise ValueError("JWT_SECRET precisa ser um segredo aleatório de pelo menos 32 caracteres")
@@ -60,21 +79,24 @@ class Settings(BaseSettings):
                 raise ValueError("CORS_ORIGINS não pode usar HTTP em produção")
             if not self.trusted_hosts.strip() or "seudominio" in self.trusted_hosts:
                 raise ValueError("TRUSTED_HOSTS precisa ser configurado em produção")
-            if self.redis_required and not self.redis_url:
-                raise ValueError("REDIS_URL precisa ser configurado quando REDIS_REQUIRED=true")
-            if self.clamav_required and not self.clamav_host:
-                raise ValueError("CLAMAV_HOST precisa ser configurado quando CLAMAV_REQUIRED=true")
+        if self.redis_required and not self.redis_url:
+            raise ValueError("REDIS_URL precisa ser configurado quando REDIS_REQUIRED=true")
+        if self.clamav_required and not self.clamav_host:
+            raise ValueError("CLAMAV_HOST precisa ser configurado quando CLAMAV_REQUIRED=true")
         return self
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """Carrega e reutiliza a configuração validada do processo."""
     return Settings()
 
 
 def get_cors_origins() -> list[str]:
+    """Converte a lista configurada de origens CORS em valores limpos."""
     return [origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()]
 
 
 def get_trusted_hosts() -> list[str]:
+    """Converte os hosts confiáveis configurados em uma lista limpa."""
     return [host.strip() for host in get_settings().trusted_hosts.split(",") if host.strip()]

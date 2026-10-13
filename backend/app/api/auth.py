@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.security import (
     create_token,
     decode_token,
+    hash_password,
     hash_refresh_token,
     verify_password,
 )
@@ -38,7 +39,8 @@ login_rate_limiter = LoginRateLimiter(
     settings.redis_url,
     settings.redis_required,
 )
-invalid_credentials = HTTPException(
+# A instância global pode reter traceback e frames com payloads da requisição após ser lançada (achado 152).
+invalid_credentials = HTTPException(  # Resposta uniforme evita distinguir conta ausente, senha incorreta ou token inválido.
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="E-mail ou senha inválidos",
     headers={"WWW-Authenticate": "Bearer"},
@@ -46,7 +48,9 @@ invalid_credentials = HTTPException(
 
 
 def issue_tokens(db: Session, user: User) -> TokenResponse:
+    """Cria tokens de acesso e sessão renovável para a conta autenticada."""
     settings = get_settings()
+    # Os valores configurados alimentam tanto a expiração do JWT quanto a da sessão persistida.
     access_ttl = timedelta(minutes=settings.access_token_expire_minutes)
     refresh_ttl = timedelta(days=settings.refresh_token_expire_days)
     session_id = str(uuid4())
@@ -57,6 +61,7 @@ def issue_tokens(db: Session, user: User) -> TokenResponse:
         token_id=session_id,
     )
     expires_at = datetime.now(timezone.utc) + refresh_ttl
+    # Persiste somente o hash do token renovável para permitir revogação sem guardar o segredo.
     db.add(
         UserSession(
             id=session_id,
@@ -80,7 +85,9 @@ def issue_tokens(db: Session, user: User) -> TokenResponse:
 
 @router.post("/login", response_model=TokenResponse)
 def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """Valida credenciais, aplica limite de tentativas e inicia a sessão."""
     client_host = request.client.host if request.client else "unknown"
+    # Combina a origem observada pela API com o e-mail normalizado para limitar tentativas.
     rate_limit_key = f"{client_host}:{payload.email}"
     try:
         allowed = login_rate_limiter.allow(rate_limit_key)
@@ -93,6 +100,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
             headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
         )
     user = db.scalar(select(User).where(User.email == payload.email))
+    # Contas ausentes/inativas saem antes do custo Argon2; a diferença temporal está no achado 57.
     if user is None or not user.is_active or not verify_password(
         payload.password, user.password_hash
     ):
@@ -102,6 +110,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
             raise HTTPException(status_code=503, detail="Proteção de login temporariamente indisponível") from exc
         raise invalid_credentials
 
+    # Credenciais válidas removem o contador de falhas antes da emissão da sessão.
     try:
         login_rate_limiter.reset(rate_limit_key)
     except RuntimeError as exc:
@@ -113,6 +122,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """Revoga o token renovável usado e emite um novo par de tokens."""
     try:
         token_payload = decode_token(payload.refresh_token, "refresh")
         session_id = str(token_payload["jti"])
@@ -120,6 +130,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     except (ValueError, KeyError, TypeError, jwt.InvalidTokenError) as exc:
         raise invalid_credentials from exc
 
+    # Serializa usos concorrentes do mesmo refresh token antes de revogá-lo.
     user_session = db.scalar(
         select(UserSession)
         .where(
@@ -141,6 +152,8 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     if user is None or not user.is_active:
         raise invalid_credentials
 
+    # Revoga a credencial usada e cria uma sessão separada para o novo par de tokens.
+    # Um logout concorrente também precisa alcançar a nova sessão desta rotação (achado 182).
     user_session.revoked_at = now
     tokens = issue_tokens(db, user)
     db.commit()
@@ -152,7 +165,10 @@ def logout(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Encerra as sessões ativas invalidando sua versão e tokens renováveis."""
+    # A nova versão invalida tokens de acesso; a atualização em lote revoga renovações ativas.
     current_user.session_version += 1
+    # Uma renovação já em curso pode inserir outra sessão após esta instrução iniciar (achado 182).
     db.execute(
         update(UserSession)
         .where(UserSession.user_id == current_user.id, UserSession.revoked_at.is_(None))
@@ -167,6 +183,7 @@ def change_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
+    """Altera a senha e encerra sessões anteriores por segurança."""
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -176,8 +193,10 @@ def change_password(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A nova senha precisa ser diferente da atual",
-        )
+    )
 
+    # A troca de credencial encerra também os tokens de acesso e renovação já emitidos.
+    # Salva somente o hash da senha; o valor recebido nunca é persistido em texto puro.
     current_user.password_hash = hash_password(payload.new_password)
     current_user.session_version += 1
     now = datetime.now(timezone.utc)
@@ -200,4 +219,5 @@ def change_password(
 
 @router.get("/me", response_model=UserResponse, tags=["users"])
 def me(current_user: User = Depends(get_current_user)) -> User:
+    """Retorna os dados públicos da conta autenticada."""
     return current_user

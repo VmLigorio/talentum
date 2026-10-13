@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 
+// Aplicação GTK que hospeda o engine Flutter e encaminha argumentos ao Dart.
 G_DECLARE_FINAL_TYPE(MyApplication,
                      my_application,
                      MY,
@@ -12,9 +13,9 @@ G_DECLARE_FINAL_TYPE(MyApplication,
 /**
  * my_application_new:
  *
- * Creates a new Flutter-based application.
+ * Cria uma nova instância da aplicação baseada em Flutter.
  *
- * Returns: a new #MyApplication.
+ * Retorna: uma nova instância de #MyApplication.
  */
 MyApplication* my_application_new();
 

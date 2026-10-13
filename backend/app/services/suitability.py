@@ -178,6 +178,7 @@ QUESTION_DEFINITIONS = (
     },
 )
 
+# Pesos das perguntas que determinam o score e a faixa de perfil de risco.
 _SCORES = {
     "investment_horizon": {
         "under_2_years": 0,
@@ -192,8 +193,10 @@ _SCORES = {
     "risk_tolerance": {"low": 0, "medium": 2, "high": 3},
 }
 
+# Rótulos públicos dos objetivos; as respostas contextuais abaixo só orientam revisões.
 OBJECTIVE_LABELS = {item["value"]: item["label"] for item in OBJECTIVES}
 
+# Opções que precisam ser validadas, mas não alteram diretamente o perfil de risco calculado.
 _CONTEXT_ANSWERS = {
     "product_familiarity": {"fixed_income", "funds", "stocks_etfs", "fiis", "derivatives_structured", "none"},
     "operation_products": {"fixed_income", "funds", "stocks_etfs", "fiis", "derivatives_structured", "none"},
@@ -230,6 +233,7 @@ _PORTFOLIO_MATRIX = {
     },
 }
 
+# A ordem das classes precisa acompanhar a posição dos percentuais em _PORTFOLIO_MATRIX.
 _ASSET_CLASSES = (
     (
         "fixed_income_liquidity",
@@ -311,6 +315,7 @@ _FII_SEGMENTS = (
     },
 )
 
+# Cada vetor segue a ordem dos segmentos de ações/FIIs declarados acima.
 _SEGMENT_WEIGHTS = {
     "equities": {
         "conservative": (40, 40, 20),
@@ -351,18 +356,22 @@ def questionnaire_definition() -> dict[str, Any]:
 def score_answers(objective: str, answers: dict[str, str]) -> tuple[int, str]:
     """Valida as respostas, calcula a pontuação e limita risco incompatível com prazo curto."""
 
+    # Exige um objetivo reconhecido antes de interpretar as respostas associadas.
     if objective not in OBJECTIVE_LABELS:
         raise ValueError("Objetivo de investimento inválido")
+    # Garante que as respostas cubram as perguntas previstas pelas tabelas de validação.
     expected_keys = set(_SCORES) | set(_CONTEXT_ANSWERS)
     missing = expected_keys - set(answers)
     if missing:
         raise ValueError("Responda todas as perguntas do questionário")
+    # Verifica opções únicas, que alimentam diretamente a pontuação de risco.
     invalid = [
         key for key, value in answers.items() if key in _SCORES and value not in _SCORES[key]
     ]
     if invalid:
         raise ValueError("Uma ou mais respostas do questionário são inválidas")
 
+    # Valida opções de múltipla escolha já removendo espaços ao redor de cada token.
     for key, valid_values in _CONTEXT_ANSWERS.items():
         raw_values = answers[key].split(",")
         selected_values = [value.strip() for value in raw_values if value.strip()]
@@ -374,6 +383,7 @@ def score_answers(objective: str, answers: dict[str, str]) -> tuple[int, str]:
         ):
             raise ValueError("Uma ou mais respostas de conhecimento e experiência são inválidas")
 
+    # Soma somente as respostas pontuadas e converte o total em uma faixa de perfil.
     score = sum(_SCORES[key][answers[key]] for key in _SCORES)
     if score <= 4:
         profile = "conservative"
@@ -382,7 +392,7 @@ def score_answers(objective: str, answers: dict[str, str]) -> tuple[int, str]:
     else:
         profile = "aggressive"
 
-    # Objetivos próximos não devem receber uma carteira agressiva automaticamente.
+    # No objetivo curto, reduz somente a faixa agressiva quando o horizonte declarado também é curto.
     if objective == "short_term" and answers["investment_horizon"] == "under_2_years":
         profile = "conservative" if profile == "aggressive" else profile
     return score, profile
@@ -401,6 +411,7 @@ def _split_percentage(total: int, weights: tuple[int, ...]) -> list[int]:
 
 
 def _suballocations(total: int, risk_profile: str, kind: str) -> list[dict[str, Any]]:
+    """Distribui a parcela entre segmentos conforme o perfil e o tipo de ativo."""
     segments = _EQUITY_SEGMENTS if kind == "equities" else _FII_SEGMENTS
     weights = _SEGMENT_WEIGHTS[kind][risk_profile]
     percentages = _split_percentage(total, weights)
@@ -426,8 +437,10 @@ def build_recommendation(
 
     if objective not in _PORTFOLIO_MATRIX or risk_profile not in RISK_PROFILES:
         raise ValueError("Combinação de objetivo e perfil inválida")
+    # Busca a matriz de percentuais para o par validado de objetivo e perfil.
     percentages = _PORTFOLIO_MATRIX[objective][risk_profile]
     allocations = []
+    # Materializa somente classes com peso e detalha ações/FIIs por segmentos próprios.
     for (asset_class, label, rationale), percentage in zip(_ASSET_CLASSES, percentages):
         if percentage <= 0:
             continue
@@ -443,6 +456,7 @@ def build_recommendation(
             allocation["suballocations"] = _suballocations(percentage, risk_profile, "fiis")
         allocations.append(allocation)
 
+    # Mantém ressalvas de liquidez, revisão humana e ausência de execução automática.
     is_short_term = objective == "short_term"
     guardrails = [
         "Separar a reserva de emergência antes de assumir risco de mercado.",
@@ -455,6 +469,7 @@ def build_recommendation(
             0,
             "Para objetivo de curto prazo, o modelo prioriza liquidez e não aloca em ações ou FIIs, mesmo no perfil arrojado.",
         )
+    # Converte alertas da situação financeira em pontos de revisão, sem recalcular pesos.
     financial_review_flags = list(
         (financial_situation or {}).get("capacity_flags", [])
     )
@@ -488,7 +503,8 @@ def build_recommendation(
 
 
 def build_knowledge_review_flags(answers: dict[str, str], recommendation: dict[str, Any]) -> list[str]:
-    """Highlights product mismatches for Advisor review without changing risk appetite."""
+    """Sinaliza incompatibilidades de familiaridade para revisão sem alterar o perfil de risco."""
+    # Respostas brutas preservam espaços aceitos por score_answers e podem gerar alertas incorretos (achado 153).
     familiar = set(answers["product_familiarity"].split(","))
     recommended_products = set()
     for allocation in recommendation["allocations"]:
@@ -513,10 +529,12 @@ def build_recommended_actions(
     financial_situation: dict[str, Any],
     knowledge_review_flags: list[str],
 ) -> list[dict[str, str]]:
-    """Turns suitability signals into concrete review steps without inventing weights."""
+    """Converte sinais do suitability em etapas de revisão sem inventar percentuais."""
+    # Combina objetivo, respostas e sinalizadores da situação financeira e do conhecimento.
     actions = []
     capacity_flags = set(financial_situation.get("capacity_flags", []))
 
+    # Destaca a preservação da parcela necessária quando o objetivo é de curto prazo.
     if objective == "short_term":
         actions.append(
             {
@@ -525,6 +543,7 @@ def build_recommended_actions(
                 "detail": "Confirme a data em que o recurso será usado e priorize liquidez e baixa oscilação para essa parcela.",
             }
         )
+    # Recomenda estruturar a reserva antes de ampliar a exposição a ativos voláteis.
     if answers["emergency_reserve"] == "no":
         actions.append(
             {
@@ -533,6 +552,7 @@ def build_recommended_actions(
                 "detail": "Defina com o cliente a reserva necessária em instrumentos líquidos e de baixo risco antes de ampliar a exposição a ativos voláteis.",
             }
         )
+    # Separa metas próximas da parcela destinada a objetivos de longo prazo.
     if "active_goal_within_2_years" in capacity_flags:
         actions.append(
             {
@@ -541,6 +561,7 @@ def build_recommended_actions(
                 "detail": "Revise as metas ativas com prazo de até dois anos e não misture os valores necessários com a parcela de longo prazo.",
             }
         )
+    # Pede revisão do orçamento se os dados não indicam sobra mensal positiva.
     if "monthly_surplus_not_positive" in capacity_flags:
         actions.append(
             {
@@ -549,6 +570,7 @@ def build_recommended_actions(
                 "detail": "A renda cadastrada não supera as despesas; confirme o orçamento e não presuma capacidade de aporte recorrente.",
             }
         )
+    # Define uma ação educativa priorizando ausência total de experiência declarada.
     if "no_prior_market_operations_reported" in knowledge_review_flags:
         actions.append(
             {
@@ -565,6 +587,7 @@ def build_recommended_actions(
                 "detail": "Apresente como funcionam as classes sem familiaridade declarada e registre a compreensão do cliente antes da validação.",
             }
         )
+    # A resposta original pode omitir esta revisão quando score_answers aceitou espaços ao redor do token (153).
     if answers["operation_frequency"] == "weekly_or_more":
         actions.append(
             {
@@ -573,6 +596,7 @@ def build_recommended_actions(
                 "detail": "Compare custos diretos e indiretos e avalie se a frequência informada é necessária para o objetivo do cliente.",
             }
         )
+    # Sempre encerra com validação humana da composição sugerida.
     actions.append(
         {
             "key": "advisor_confirm_allocation",

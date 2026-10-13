@@ -5,6 +5,7 @@ export function formatMoneyInput(input: string): string {
   const sanitized = input.replace(/[^\d,.-]/g, '');
   if (!sanitized || sanitized === '-') return sanitized;
   const commaIndex = sanitized.indexOf(',');
+  // A primeira vírgula sempre marca os decimais; pontuação mista pode reduzir o valor (achado 147).
   const periodsAreGrouping = commaIndex < 0 && /^-?\d{1,3}(\.\d{3})+$/.test(sanitized);
   const separatorIndex = commaIndex >= 0
     ? commaIndex
@@ -12,6 +13,7 @@ export function formatMoneyInput(input: string): string {
       ? -1
       : sanitized.lastIndexOf('.');
   const integerSource = separatorIndex >= 0 ? sanitized.slice(0, separatorIndex) : sanitized;
+  // O protótipo trunca o excedente em vez de rejeitar toda a edição (achado 99).
   const fraction = separatorIndex >= 0
     ? sanitized.slice(separatorIndex + 1).replace(/\D/g, '').slice(0, 2)
     : '';
@@ -21,6 +23,7 @@ export function formatMoneyInput(input: string): string {
   return `${negative ? '-' : ''}${grouped}${separatorIndex >= 0 ? `,${fraction}` : ''}`;
 }
 
+// Converte o valor monetário formatado em número para cálculos.
 export function parseMoneyInput(input: string): number {
   const formatted = formatMoneyInput(input);
   if (!formatted || formatted === '-') return Number.NaN;
@@ -28,6 +31,7 @@ export function parseMoneyInput(input: string): number {
   return Number(normalized);
 }
 
+// Exibe cotas inteiras sem decimais e remove zeros finais nas fracionadas.
 export function formatInvestmentQuantity(value: number | string | null | undefined): string {
   if (value == null || value === '') return '0';
   const raw = typeof value === 'number'
@@ -43,6 +47,7 @@ export function formatInvestmentQuantity(value: number | string | null | undefin
   return fraction ? `${integer},${fraction}` : integer;
 }
 
+// Calcula a posição do cursor após a máscara monetária ser aplicada.
 export function moneyCaretOffset(formatted: string, digitsBeforeCaret: number, pastDecimal = false): number {
   if (digitsBeforeCaret <= 0) return pastDecimal ? formatted.indexOf(',') + 1 : 0;
   let seen = 0;

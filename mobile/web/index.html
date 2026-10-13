@@ -2,31 +2,33 @@
 <html>
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
+    Se o app Web for servido em um caminho diferente da raiz, ajuste o valor de
+    href abaixo para refletir o caminho-base usado na hospedagem.
 
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
+    Para funcionar corretamente, o caminho informado precisa começar e terminar
+    com uma barra "/".
 
-    For more details:
+    Mais detalhes:
     * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
 
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    Este espaço reservado para o caminho-base será substituído pelo valor
+    informado em `--base-href` ao executar `flutter build`.
   -->
   <base href="$FLUTTER_BASE_HREF">
 
+  <!-- Codificação, compatibilidade, descrição e cor do tema do navegador. -->
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Planejamento financeiro com propósito.">
+  <meta name="theme-color" content="#17324D">
 
-  <!-- iOS meta tags & icons -->
+  <!-- Metadados e ícones usados quando o app é aberto em dispositivos iOS. -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Talentum">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
+  <!-- Ícone exibido na aba do navegador. -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>Talentum</title>
@@ -34,11 +36,10 @@
 </head>
 <body>
   <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+    O script "flutter_bootstrap.js" pode ser personalizado para configurar o
+    carregador Flutter ou exibir feedback durante a inicialização do app.
 
-    For more details:
+    Mais detalhes:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>

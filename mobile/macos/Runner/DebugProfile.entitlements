@@ -2,11 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Isola o processo macOS e restringe recursos às permissões concedidas ao app. -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- Permite ao runtime Flutter usar compilação JIT nas configurações Debug/Profile. -->
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
+	<!-- Permite que o processo aceite conexões de entrada; não habilita chamadas de saída. -->
 	<key>com.apple.security.network.server</key>
 	<true/>
+	<!-- Achados 104–105: faltam network.client e files.user-selected.read-write, necessários à API e ao file_picker. -->
 </dict>
 </plist>

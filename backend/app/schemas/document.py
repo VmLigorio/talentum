@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class DocumentResponse(BaseModel):
+    """Metadados e estado de revisão de um documento retornado pela API."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

@@ -7,6 +7,7 @@ Revision ID: 0003_create_client_access
 Revises: 0002_create_sessions
 Create Date: 2026-09-17
 """
+# Finalidade: Cria perfil cadastral, permissões do cliente e trilha de auditoria.
 
 from typing import Sequence, Union
 
@@ -22,6 +23,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria perfil cadastral, permissões do cliente e trilha de auditoria."""
+    # Mantém um perfil único por cliente e permite remover o Advisor sem excluir o cadastro.
     op.create_table(
         "client_profiles",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -38,9 +41,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("user_id"),
     )
+    # Apoia consultas do cliente e do assessor responsável pelo vínculo.
     op.create_index("ix_client_profiles_user_id", "client_profiles", ["user_id"], unique=False)
     op.create_index("ix_client_profiles_advisor_id", "client_profiles", ["advisor_id"], unique=False)
 
+    # Inicializa permissões separadas com acesso de edição negado por padrão.
     op.create_table(
         "client_permissions",
         sa.Column("client_id", sa.Integer(), nullable=False),
@@ -54,6 +59,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("client_id"),
     )
 
+    # Preserva o histórico de ações mesmo se uma das contas relacionadas for removida.
     op.create_table(
         "audit_logs",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -68,11 +74,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["client_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
+    # Acelera a consulta dos eventos por autor e por cliente auditado.
     op.create_index("ix_audit_logs_actor_user_id", "audit_logs", ["actor_user_id"], unique=False)
     op.create_index("ix_audit_logs_client_user_id", "audit_logs", ["client_user_id"], unique=False)
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Reverte tabelas e índices na ordem inversa para respeitar suas dependências.
     op.drop_index("ix_audit_logs_client_user_id", table_name="audit_logs")
     op.drop_index("ix_audit_logs_actor_user_id", table_name="audit_logs")
     op.drop_table("audit_logs")

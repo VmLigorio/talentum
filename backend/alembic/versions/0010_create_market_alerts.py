@@ -7,6 +7,7 @@ Revision ID: 0010_create_market_alerts
 Revises: 0009_notification_prefs
 Create Date: 2026-09-18
 """
+# Finalidade: Cria alertas de preço e seus estados de acompanhamento.
 
 from typing import Sequence, Union
 
@@ -21,10 +22,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria alertas de preço e seus estados de acompanhamento."""
+    # Acrescenta uma preferência de recebimento para alertas de cotação.
     op.add_column(
         "notification_preferences",
         sa.Column("market_price_alert", sa.Boolean(), server_default=sa.text("true"), nullable=False),
     )
+    # Registra alvo, condição, última cotação observada e estado de cada alerta.
     op.create_table(
         "market_alerts",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -40,14 +44,18 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["client_id"], ["users.id"], ondelete="CASCADE"),
+        # Mantém a autoria enquanto o alerta depender da conta que o criou.
         sa.ForeignKeyConstraint(["created_by_user_id"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
     )
+    # Apoia listagens por cliente e consultas de auditoria por autor.
     op.create_index("ix_market_alerts_client_id", "market_alerts", ["client_id"], unique=False)
     op.create_index("ix_market_alerts_created_by_user_id", "market_alerts", ["created_by_user_id"], unique=False)
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Reverte os índices e a tabela antes de remover a preferência adicionada.
     op.drop_index("ix_market_alerts_created_by_user_id", table_name="market_alerts")
     op.drop_index("ix_market_alerts_client_id", table_name="market_alerts")
     op.drop_table("market_alerts")

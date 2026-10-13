@@ -5,7 +5,7 @@
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="12089"/>
     </dependencies>
     <scenes>
-        <!--View Controller-->
+        <!-- Cena inicial exibida pelo iOS antes do Flutter assumir a tela. -->
         <scene sceneID="EHf-IW-A2E">
             <objects>
                 <viewController id="01J-lp-oVM" sceneMemberID="viewController">
@@ -16,13 +16,17 @@
                     <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="center" image="LaunchImage" translatesAutoresizingMaskIntoConstraints="NO" id="YRO-k0-Ey4">
+                            <!-- Marca centralizada e ajustada sem cortar a proporção original. -->
+                            <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleAspectFit" image="LaunchImage" translatesAutoresizingMaskIntoConstraints="NO" id="YRO-k0-Ey4">
                             </imageView>
                         </subviews>
-                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="0.0902" green="0.1961" blue="0.3020" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <!-- Mantém a logo central e limita seu tamanho para caber em telas pequenas. -->
                         <constraints>
                             <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="1a2-6s-vTC"/>
                             <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="4X2-HB-R7a"/>
+                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="width" constant="115" id="i7H-5P-rQ2"/>
+                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="height" constant="115" id="p3R-v8-cV1"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -31,6 +35,7 @@
             <point key="canvasLocation" x="53" y="375"/>
         </scene>
     </scenes>
+    <!-- Imagem de abertura armazenada no catálogo LaunchImage do projeto iOS. -->
     <resources>
         <image name="LaunchImage" width="168" height="185"/>
     </resources>

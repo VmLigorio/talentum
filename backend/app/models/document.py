@@ -10,17 +10,21 @@ from app.db.database import Base
 
 
 class Document(Base):
+    """Metadados e estado de revisão de um documento do cliente."""
     __tablename__ = "documents"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Identifica o cliente e quem enviou; exclusões seguem regras distintas de retenção.
     client_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     uploaded_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    # Separa o nome mostrado ao cliente do nome único usado no armazenamento externo.
     original_name: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    # Classificação e propriedades descrevem o arquivo sem armazenar seus bytes nesta tabela.
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(30), nullable=False, default="other")
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)

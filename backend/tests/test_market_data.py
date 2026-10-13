@@ -8,34 +8,44 @@ from app.services.market_data import MarketDataService, _date, _history_summary,
 
 
 class _FakeResponse:
+    """Resposta HTTP simples controlada pelos testes de integração do serviço."""
     def __init__(self, payload: dict, success: bool = True) -> None:
+        """Inicializa o objeto simulado com os dados de resposta do cenário."""
         self._payload = payload
         self.is_success = success
 
     def json(self) -> dict:
+        """Devolve ao serviço o corpo JSON preparado pelo teste."""
         return self._payload
 
     def raise_for_status(self) -> None:
+        """Mantém a interface compatível sem lançar erro na resposta simulada."""
         return None
 
 
 class _FakeClient:
+    """Cliente HTTP falso que registra chamadas sem acessar fontes externas."""
     def __init__(self, response: _FakeResponse) -> None:
+        """Inicializa o objeto simulado com os dados de resposta do cenário."""
         self.response = response
         self.calls: list[tuple[str, dict]] = []
 
     def __enter__(self) -> "_FakeClient":
+        """Permite usar o cliente falso em um bloco de contexto."""
         return self
 
     def __exit__(self, *args: object) -> None:
+        """Encerra o cliente falso sem efeitos externos."""
         return None
 
     def get(self, url: str, **kwargs: object) -> _FakeResponse:
+        """Registra a requisição e devolve a resposta simulada."""
         self.calls.append((url, kwargs))
         return self.response
 
 
 def test_market_data_normalizers() -> None:
+    """Verifica a conversão segura de números e datas recebidos de fontes de mercado."""
     assert _number("12.5") == 12.5
     assert _number(True) is None
     assert _date(0).tzinfo == timezone.utc
@@ -43,6 +53,7 @@ def test_market_data_normalizers() -> None:
 
 
 def test_brapi_quote_is_normalized() -> None:
+    """Verifica a normalização dos campos de cotação retornados pela Brapi."""
     item = MarketDataService._brapi_item(
         {
             "symbol": "PETR4",
@@ -62,6 +73,7 @@ def test_brapi_quote_is_normalized() -> None:
 
 
 def test_brapi_list_fields_are_normalized(monkeypatch) -> None:
+    """Verifica a interpretação dos campos de pesquisa de ativos da Brapi."""
     clear_market_cache()
     client = _FakeClient(
         _FakeResponse(
@@ -93,6 +105,7 @@ def test_brapi_list_fields_are_normalized(monkeypatch) -> None:
 
 
 def test_repeated_search_uses_short_lived_cache(monkeypatch) -> None:
+    """Verifica que buscas repetidas reutilizam o cache temporário."""
     clear_market_cache()
     client = _FakeClient(_FakeResponse({"stocks": [{"stock": "QUAL3", "name": "QUAL3", "close": 8.2}]}))
     monkeypatch.setattr("app.services.market_data.httpx.Client", lambda **kwargs: client)
@@ -106,6 +119,7 @@ def test_repeated_search_uses_short_lived_cache(monkeypatch) -> None:
 
 
 def test_ibovespa_alias_uses_bvsp(monkeypatch) -> None:
+    """Verifica que o apelido IBOVESPA é consultado pelo símbolo correto."""
     client = _FakeClient(
         _FakeResponse(
             {
@@ -128,6 +142,7 @@ def test_ibovespa_alias_uses_bvsp(monkeypatch) -> None:
 
 
 def test_fii_indicators_are_normalized() -> None:
+    """Verifica a normalização dos indicadores específicos de fundos imobiliários."""
     base = MarketInstrument(
         market="br",
         symbol="MXRF11",
@@ -165,6 +180,7 @@ def test_fii_indicators_are_normalized() -> None:
 
 
 def test_history_points_calculate_normalized_return() -> None:
+    """Verifica o cálculo de retorno relativo entre pontos históricos."""
     points = [
         MarketHistoryPoint(date=_date(1) or _date(0), close=100),
         MarketHistoryPoint(date=_date(2) or _date(0), close=110),
@@ -179,12 +195,14 @@ def test_history_points_calculate_normalized_return() -> None:
 
 
 def test_brazil_history_uses_yahoo_symbol_fallback() -> None:
+    """Verifica a montagem do símbolo Yahoo para ativos brasileiros e o índice."""
     assert MarketDataService._yahoo_symbol_for_brazil("PETR4") == "PETR4.SA"
     assert MarketDataService._yahoo_symbol_for_brazil("MXRF11") == "MXRF11.SA"
     assert MarketDataService._yahoo_symbol_for_brazil("^BVSP") == "^BVSP"
 
 
 def test_history_summary_reports_volatility_and_drawdown() -> None:
+    """Verifica estatísticas resumidas de volume, volatilidade e queda máxima."""
     points = [
         MarketHistoryPoint(date=_date(1) or _date(0), close=100, volume=10),
         MarketHistoryPoint(date=_date(2) or _date(0), close=120, volume=20),

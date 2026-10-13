@@ -8,8 +8,10 @@ from app.db.database import Base
 
 
 class NotificationPreference(Base):
+    """Preferências de recebimento de notificações de cada usuário."""
     __tablename__ = "notification_preferences"
 
+    # Cada usuário tem uma linha; as opções booleanas controlam cada tipo de aviso.
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )

@@ -7,6 +7,7 @@ Revision ID: 0002_create_sessions
 Revises: 0001_create_users
 Create Date: 2026-09-17
 """
+# Finalidade: Cria o armazenamento de sessões renováveis e sua expiração ou revogação.
 
 from typing import Sequence, Union
 
@@ -21,6 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    """Aplica a mudança de esquema: Cria o armazenamento de sessões renováveis e sua expiração ou revogação."""
+    # Guarda somente o hash do refresh token, com validade e instante de revogação.
     op.create_table(
         "sessions",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -37,9 +40,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
+    # Acelera a busca das sessões vinculadas a cada conta.
     op.create_index("ix_sessions_user_id", "sessions", ["user_id"], unique=False)
 
 
 def downgrade() -> None:
+    """Reverte a mudança de esquema desta revisão e remove os objetos criados."""
+    # Remove o índice dependente antes de eliminar a tabela de sessões.
     op.drop_index("ix_sessions_user_id", table_name="sessions")
     op.drop_table("sessions")

@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ReportResponse(BaseModel):
+    """Relatório e período exibidos ao cliente ou assessor."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -22,22 +24,31 @@ class ReportResponse(BaseModel):
 
 
 class ReportCreate(BaseModel):
+    """Dados para criar um relatório e validar sua janela de referência."""
+
     title: str = Field(min_length=2, max_length=160)
     period_start: date
     period_end: date
+    # Sem máximo explícito, o resumo pode ser enviado e persistido com tamanho arbitrário (achado 67).
     summary: str = Field(min_length=2)
     status: str = Field(default="draft", pattern="^(draft|published)$")
 
     @model_validator(mode="after")
     def validate_period(self):
+        """Impede que o relatório termine antes da data de início."""
         if self.period_end < self.period_start:
             raise ValueError("O fim do período não pode ser anterior ao início")
         return self
 
 
 class ReportUpdate(BaseModel):
+    """Campos opcionais aceitos na edição de um relatório."""
+
+    # Cada valor é validado isoladamente; a ordem entre início e fim só é
+    # verificada no schema de criação, não neste PATCH.
     title: str | None = Field(default=None, min_length=2, max_length=160)
     period_start: date | None = None
     period_end: date | None = None
+    # PATCH mantém a mesma ausência de limite superior do resumo de criação (achado 67).
     summary: str | None = Field(default=None, min_length=2)
     status: str | None = Field(default=None, pattern="^(draft|published)$")

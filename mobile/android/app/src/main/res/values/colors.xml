@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<!-- Cor azul petróleo usada como fundo da splash e das janelas Android. -->
+	<color name="talentum_background">#17324D</color>
+</resources>

@@ -5,6 +5,7 @@ from app.reset_password import parse_args
 
 
 def test_reset_password_requires_email(monkeypatch) -> None:
+    """Verifica que a ferramenta de redefinição exige o e-mail como argumento."""
     monkeypatch.setattr("sys.argv", ["reset-password", "--email", "ADMIN@TALENTUM.LOCAL"])
 
     args = parse_args()

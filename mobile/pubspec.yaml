@@ -6,26 +6,31 @@ publish_to: "none"
 version: 0.1.0+1
 
 environment:
+  # A faixa mínima declarada diverge do SDK exigido pelo lockfile (achado 180).
   sdk: ">=3.3.0 <4.0.0"
 
+# Pacotes usados pelo aplicativo em execução, além do Flutter SDK.
 dependencies:
   flutter:
     sdk: flutter
   file_picker: ^11.0.3
   flutter_secure_storage: ^10.3.4
   local_auth: ^3.0.2
+  printing: ^5.14.3
   shared_preferences: ^2.3.5
 
+# Ferramentas usadas para testar e analisar o código durante o desenvolvimento.
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
 
 dependency_overrides:
-  # Keeps the Android build independent of the optional JNI/NDK toolchain.
+  # Mantém a compilação Android independente da cadeia JNI/NDK opcional.
   path_provider_android: 2.2.22
 
 flutter:
   uses-material-design: true
+  # Inclui a marca usada pela interface para que Image.asset consiga carregá-la.
   assets:
-    - assets/brand/talentum-web-logo.png
+    - assets/brand/talentum-moeda-prata.png

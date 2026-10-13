@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema de abertura para Android 12+: configura a splash nativa enquanto o Flutter inicia. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- Mantém fundo, ícone e barras do sistema na identidade azul petróleo do app. -->
+        <item name="android:windowSplashScreenBackground">@color/talentum_background</item>
+        <!-- Android recorta o ícone da splash à zona segura central de 2/3 (achado 150). -->
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/talentum_splash_logo</item>
+        <!-- Usa a cor da marca nas barras e mantém seus ícones claros sobre o fundo escuro. -->
+        <item name="android:statusBarColor">@color/talentum_background</item>
+        <item name="android:navigationBarColor">@color/talentum_background</item>
+        <!-- Força ícones claros nas barras para contrastarem com o fundo escuro. -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <!-- Tema aplicado depois que o Flutter assume a janela do aplicativo. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/talentum_background</item>
+        <!-- Conserva o fundo escuro e o contraste das barras depois da splash. -->
+        <item name="android:statusBarColor">@color/talentum_background</item>
+        <item name="android:navigationBarColor">@color/talentum_background</item>
+    </style>
+</resources>

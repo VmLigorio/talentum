@@ -10,6 +10,7 @@ from app.schemas.report import ReportCreate
 
 
 def test_report_period_must_be_valid() -> None:
+    """Verifica que a data final do relatório não antecede a inicial."""
     with pytest.raises(ValidationError):
         ReportCreate(
             title="Relatório mensal",

@@ -5,12 +5,15 @@
 # Substitua api.seudominio.com e os caminhos dos certificados antes de ativar.
 # O Compose de produção publica a API somente em 127.0.0.1:8100 por padrão.
 
+# Redireciona conexões sem TLS para a configuração HTTPS abaixo.
 server {
     listen 80;
     server_name api.seudominio.com;
+    # O host vem da requisição; se este for o servidor padrão, um Host arbitrário controla o destino (achado 179).
     return 301 https://$host$request_uri;
 }
 
+# Termina TLS no proxy e encaminha requisições para a API acessível localmente.
 server {
     listen 443 ssl http2;
     server_name api.seudominio.com;
@@ -20,8 +23,10 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+    # Mantém o limite de upload do proxy alinhado ao limite de corpo da API.
     client_max_body_size 12m;
 
+    # Encaminha a requisição e os metadados de origem para o serviço interno.
     location / {
         proxy_pass http://127.0.0.1:8100;
         proxy_http_version 1.1;
@@ -29,6 +34,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Interrompe espera longa pelo upstream, inclusive durante a montagem do PDF.
         proxy_read_timeout 60s;
     }
 }

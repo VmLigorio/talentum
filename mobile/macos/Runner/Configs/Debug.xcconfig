@@ -1,2 +1,4 @@
+// Importa as opções geradas pelo Flutter para compilar o modo Debug.
 #include "../../Flutter/Flutter-Debug.xcconfig"
+// Ativa avisos de compilação comuns aos arquivos nativos do Runner.
 #include "Warnings.xcconfig"

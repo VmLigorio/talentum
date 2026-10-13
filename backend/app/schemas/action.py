@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ActionItemResponse(BaseModel):
+    """Ação de planejamento financeiro retornada para o cliente."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -22,6 +24,8 @@ class ActionItemResponse(BaseModel):
 
 
 class ActionItemCreate(BaseModel):
+    """Dados validados para criar uma ação no plano do cliente."""
+
     title: str = Field(min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
     goal_id: int | None = Field(default=None, gt=0)
@@ -31,6 +35,10 @@ class ActionItemCreate(BaseModel):
 
 
 class ActionItemUpdate(BaseModel):
+    """Campos opcionais que podem ser alterados em uma ação existente."""
+
+    # Campos opcionais aceitam null explicitamente; título, status e prioridade
+    # são obrigatórios no banco e podem falhar no commit se receberem null.
     title: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
     goal_id: int | None = Field(default=None, gt=0)

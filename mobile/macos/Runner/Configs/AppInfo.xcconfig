@@ -1,14 +1,13 @@
-// Application-level settings for the Runner target.
+// Configurações do aplicativo para o destino de compilação Runner.
 //
-// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
-// future. If not, the values below would default to using the project name when this becomes a
-// 'flutter create' template.
+// No futuro, estas definições podem ser geradas a partir de metadados como pubspec.yaml.
+// Se forem removidas, o modelo padrão do Flutter usa o nome do projeto.
 
-// The application's name. By default this is also the title of the Flutter window.
+// Nome do aplicativo, usado também como título padrão da janela Flutter.
 PRODUCT_NAME = talentum_mobile
 
-// The application's bundle identifier
+// Identificador exclusivo do pacote do aplicativo no macOS.
 PRODUCT_BUNDLE_IDENTIFIER = com.example.talentumMobile
 
-// The copyright displayed in application information
+// Aviso de direitos autorais exibido nas informações do aplicativo.
 PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.

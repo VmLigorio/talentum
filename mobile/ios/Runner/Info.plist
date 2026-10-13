@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Dados de identificação e versão preenchidos pelo build do Flutter/Xcode. -->
+	<!-- Libera solicitações acima da taxa padrão nas telas ProMotion compatíveis. -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -24,8 +26,10 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Texto apresentado pelo iOS ao solicitar permissão para usar o Face ID. -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use a biometria para desbloquear o acesso ao Talentum.</string>
+	<!-- Restringe o app ao iOS e descreve como as janelas/cenas são inicializadas. -->
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
@@ -51,10 +55,12 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Storyboard de abertura e storyboard principal carregados pelo iOS. -->
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!-- Orientações aceitas em iPhone e iPad. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

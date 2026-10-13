@@ -5,6 +5,7 @@ from app.main import app
 
 
 def test_client_access_routes_are_registered() -> None:
+    """Verifica o registro das rotas de cliente e permissões."""
     routes = app.openapi()["paths"]
 
     assert {
@@ -23,6 +24,7 @@ def test_client_access_routes_are_registered() -> None:
 
 
 def test_admin_user_management_routes_are_registered() -> None:
+    """Verifica o registro de gerenciamento administrativo de contas."""
     routes = app.openapi()["paths"]
 
     assert {

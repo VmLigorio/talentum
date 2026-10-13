@@ -1,22 +1,20 @@
-# Project-level configuration.
+# Configuração do projeto Linux para compilação do aplicativo Flutter.
 cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
-# The name of the executable created for the application. Change this to change
-# the on-disk name of your application.
+# Nome do executável gerado para o aplicativo; altere-o para mudar o nome do arquivo.
 set(BINARY_NAME "talentum_mobile")
-# The unique GTK application identifier for this application. See:
+# Identificador GTK exclusivo deste aplicativo. Consulte:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.example.talentum_mobile")
 
-# Explicitly opt in to modern CMake behaviors to avoid warnings with recent
-# versions of CMake.
+# Ativa explicitamente regras modernas do CMake para evitar avisos em versões recentes.
 cmake_policy(SET CMP0063 NEW)
 
-# Load bundled libraries from the lib/ directory relative to the binary.
+# Localiza bibliotecas empacotadas no diretório lib relativo ao executável.
 set(CMAKE_INSTALL_RPATH "$ORIGIN/lib")
 
-# Root filesystem for cross-building.
+# Define a raiz do sistema de arquivos quando a compilação cruzada a fornece.
 if(FLUTTER_TARGET_PLATFORM_SYSROOT)
   set(CMAKE_SYSROOT ${FLUTTER_TARGET_PLATFORM_SYSROOT})
   set(CMAKE_FIND_ROOT_PATH ${CMAKE_SYSROOT})
@@ -26,7 +24,7 @@ if(FLUTTER_TARGET_PLATFORM_SYSROOT)
   set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 endif()
 
-# Define build configuration options.
+# Define opções para a configuração de compilação escolhida.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE "Debug" CACHE
     STRING "Flutter build mode" FORCE)
@@ -34,11 +32,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     "Debug" "Profile" "Release")
 endif()
 
-# Compilation settings that should be applied to most targets.
+# Aplica as configurações de compilação compartilhadas pelos alvos do app.
 #
-# Be cautious about adding new options here, as plugins use this function by
-# default. In most cases, you should add new options to specific targets instead
-# of modifying this function.
+# Evite adicionar opções globais aqui: os plugins também usam esta função.
+# Quando necessário, prefira configurar apenas o alvo que precisa da opção.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
@@ -46,44 +43,41 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()
 
-# Flutter library and tool build rules.
+# Inclui as regras de compilação da biblioteca Flutter e de suas ferramentas.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
-# System-level dependencies.
+# Localiza as dependências GTK instaladas no sistema.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
 
-# Application build; see runner/CMakeLists.txt.
+# Adiciona as regras do executável nativo em runner/CMakeLists.txt.
 add_subdirectory("runner")
 
-# Run the Flutter tool portions of the build. This must not be removed.
+# Executa a etapa do Flutter que prepara os artefatos necessários à compilação.
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
-# Only the install-generated bundle's copy of the executable will launch
-# correctly, since the resources must in the right relative locations. To avoid
-# people trying to run the unbundled copy, put it in a subdirectory instead of
-# the default top-level location.
+# O executável só inicia corretamente dentro do pacote instalado, pois depende
+# de recursos em caminhos relativos. Por isso, a cópia intermediária fica em
+# uma subpasta, evitando que seja iniciada fora do pacote.
 set_target_properties(${BINARY_NAME}
   PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/intermediates_do_not_run"
 )
 
 
-# Generated plugin build rules, which manage building the plugins and adding
-# them to the application.
+# Inclui regras geradas que compilam os plugins e os vinculam ao aplicativo.
 include(flutter/generated_plugins.cmake)
 
 
 # === Installation ===
-# By default, "installing" just makes a relocatable bundle in the build
-# directory.
+# Por padrão, a instalação cria um pacote relocável dentro do diretório de build.
 set(BUILD_BUNDLE_DIR "${PROJECT_BINARY_DIR}/bundle")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
 endif()
 
-# Start with a clean build bundle directory every time.
+# Remove o pacote anterior antes de instalar os arquivos da compilação atual.
 install(CODE "
   file(REMOVE_RECURSE \"${BUILD_BUNDLE_DIR}/\")
   " COMPONENT Runtime)
@@ -106,14 +100,13 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
-# Copy the native assets provided by the build.dart from all packages.
+# Copia os recursos nativos que as dependências produziram para Linux.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
 
-# Fully re-copy the assets directory on each build to avoid having stale files
-# from a previous install.
+# Substitui a pasta de recursos em cada instalação para remover arquivos antigos.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
 install(CODE "
   file(REMOVE_RECURSE \"${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
@@ -121,7 +114,7 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
-# Install the AOT library on non-Debug builds only.
+# Instala a biblioteca AOT somente nas configurações diferentes de Debug.
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)

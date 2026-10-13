@@ -1,3 +1,4 @@
+# Lista compartilhada de dependências do backend; a maioria não fixa versão.
 alembic
 argon2-cffi
 fastapi
@@ -7,6 +8,7 @@ psycopg[binary]
 pydantic-settings
 PyJWT
 redis>=5,<7
+# O runner de testes também é instalado na imagem da API por esta lista compartilhada.
 pytest
 python-dotenv
 reportlab>=4.2,<5

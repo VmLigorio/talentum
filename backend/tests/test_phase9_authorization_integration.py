@@ -1,4 +1,4 @@
-"""PostgreSQL-backed HTTP tests for the core client authorization flows."""
+"""Testes HTTP com PostgreSQL dos principais fluxos de autorização do cliente."""
 
 from contextlib import asynccontextmanager
 import os
@@ -22,6 +22,7 @@ PASSWORD = "Phase9-Test-Only-Password!"
 
 @pytest.fixture(scope="session")
 def phase9_session_factory():
+    """Cria uma fábrica de sessões isolada para os testes de autorização."""
     database_url = os.getenv("TEST_DATABASE_URL")
     if not database_url:
         pytest.skip("Configure TEST_DATABASE_URL apontando para um PostgreSQL exclusivo de testes")
@@ -42,6 +43,7 @@ def phase9_session_factory():
 
 @pytest.fixture
 def phase9_users(phase9_session_factory):
+    """Prepara administrador, assessor e clientes usados nos cenários integrados."""
     session = phase9_session_factory()
     suffix = uuid4().hex
     users = {
@@ -104,6 +106,7 @@ def phase9_users(phase9_session_factory):
                     )
                 )
             )
+            # As referências de auditoria usam SET NULL; sem remoção explícita, eventos do teste ficam órfãos (achado 166).
             session.execute(delete(User).where(User.id.in_(user_ids)))
             session.commit()
         session.close()
@@ -111,14 +114,17 @@ def phase9_users(phase9_session_factory):
 
 @pytest.fixture
 def phase9_api_client(monkeypatch, phase9_session_factory):
+    """Monta o cliente HTTP com banco e tarefas de ciclo de vida controlados."""
     original_overrides = app.dependency_overrides.copy()
 
     @asynccontextmanager
     async def test_lifespan(_app):
-        # Do not start market, snapshot, or document reminder monitors in HTTP tests.
+        # Evita iniciar monitores de mercado, snapshots e documentos nos testes HTTP.
+        """Substitui as tarefas de fundo para evitar chamadas externas durante o teste."""
         yield
 
     def override_get_db():
+        """Fornece ao aplicativo a sessão isolada do cenário de teste."""
         session = phase9_session_factory()
         try:
             yield session
@@ -136,13 +142,30 @@ def phase9_api_client(monkeypatch, phase9_session_factory):
 
 
 def _authorization(client: TestClient, email: str) -> dict[str, str]:
+    """Autentica uma conta de teste e retorna seu cabeçalho Bearer."""
     response = client.post("/auth/login", json={"email": email, "password": PASSWORD})
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.mark.integration
+def test_logout_revokes_the_access_token(phase9_api_client, phase9_users) -> None:
+    """Garante que o token de acesso deixa de funcionar após o logout."""
+    client = phase9_api_client
+    headers = _authorization(client, phase9_users["client_a"]["email"])
+
+    before_logout = client.get("/auth/me", headers=headers)
+    logout = client.post("/auth/logout", headers=headers)
+    after_logout = client.get("/auth/me", headers=headers)
+
+    assert before_logout.status_code == 200
+    assert logout.status_code == 204
+    assert after_logout.status_code == 401
+
+
+@pytest.mark.integration
 def test_admin_onboards_client_and_assigns_advisor(phase9_api_client, phase9_users) -> None:
+    """Verifica criação de cliente, permissões e atribuição inicial ao assessor."""
     client = phase9_api_client
     users = phase9_users
     suffix = users["suffix"]
@@ -193,6 +216,7 @@ def test_admin_onboards_client_and_assigns_advisor(phase9_api_client, phase9_use
 
 @pytest.mark.integration
 def test_advisor_only_lists_and_reads_assigned_clients(phase9_api_client, phase9_users) -> None:
+    """Verifica que o assessor acessa apenas clientes que lhe foram atribuídos."""
     client = phase9_api_client
     users = phase9_users
     advisor_headers = _authorization(client, users["advisor_a"]["email"])
@@ -207,14 +231,19 @@ def test_advisor_only_lists_and_reads_assigned_clients(phase9_api_client, phase9
     unassigned_client = client.get(
         f"/clients/{users['client_b']['id']}/dashboard", headers=advisor_headers
     )
+    nonexistent_client = client.get(
+        "/clients/2147483647/dashboard", headers=advisor_headers
+    )
     assert assigned_client.status_code == 200
-    assert unassigned_client.status_code == 403
+    assert unassigned_client.status_code == 404
+    assert unassigned_client.json() == nonexistent_client.json()
 
 
 @pytest.mark.integration
 def test_client_cannot_read_other_client_or_write_without_permission(
     phase9_api_client, phase9_users
 ) -> None:
+    """Verifica isolamento entre clientes e bloqueio de edição sem permissão."""
     client = phase9_api_client
     users = phase9_users
     client_headers = _authorization(client, users["client_a"]["email"])
@@ -224,6 +253,15 @@ def test_client_cannot_read_other_client_or_write_without_permission(
     )
     another_patrimony = client.get(
         f"/clients/{users['client_b']['id']}/patrimony", headers=client_headers
+    )
+    nonexistent_patrimony = client.get(
+        "/clients/2147483647/patrimony", headers=client_headers
+    )
+    another_goals = client.get(
+        f"/clients/{users['client_b']['id']}/goals", headers=client_headers
+    )
+    nonexistent_goals = client.get(
+        "/clients/2147483647/goals", headers=client_headers
     )
     forbidden_write = client.post(
         f"/clients/{users['client_a']['id']}/patrimony",
@@ -236,14 +274,77 @@ def test_client_cannot_read_other_client_or_write_without_permission(
     )
 
     assert own_patrimony.status_code == 200
-    assert another_patrimony.status_code == 403
+    assert another_patrimony.status_code == 404
+    assert another_patrimony.json() == nonexistent_patrimony.json()
+    assert another_goals.status_code == 404
+    assert another_goals.json() == nonexistent_goals.json()
     assert forbidden_write.status_code == 403
+
+
+@pytest.mark.integration
+def test_advisor_cannot_mutate_or_download_an_unassigned_client_resource(
+    phase9_api_client, phase9_users, tmp_path, monkeypatch
+) -> None:
+    """Confirma que a negação de acesso cruzado é uniforme em escrita e download."""
+    from app.api import documents as documents_api
+
+    monkeypatch.setattr(documents_api.settings, "storage_dir", str(tmp_path))
+    monkeypatch.setattr(documents_api, "scan_file", lambda _path: None)
+    client = phase9_api_client
+    users = phase9_users
+    client_b_id = users["client_b"]["id"]
+    advisor_b_headers = _authorization(client, users["advisor_b"]["email"])
+    advisor_a_headers = _authorization(client, users["advisor_a"]["email"])
+
+    created = client.post(
+        f"/clients/{client_b_id}/patrimony",
+        headers=advisor_b_headers,
+        json={"category": "Reserva", "description": "Reserva B", "value": "500.00"},
+    )
+    uploaded = client.post(
+        f"/clients/{client_b_id}/documents",
+        headers=advisor_b_headers,
+        files={
+            "file": (
+                "comprovante.pdf",
+                b"%PDF-1.7\nsynthetic\n%%EOF",
+                "application/pdf",
+            )
+        },
+        data={"kind": "income_proof", "description": "Documento sintético"},
+    )
+    assert created.status_code == 201, created.text
+    assert uploaded.status_code == 201, uploaded.text
+
+    denied_update = client.patch(
+        f"/clients/{client_b_id}/patrimony/{created.json()['id']}",
+        headers=advisor_a_headers,
+        json={"value": "750.00"},
+    )
+    nonexistent_update = client.patch(
+        "/clients/2147483647/patrimony/2147483647",
+        headers=advisor_a_headers,
+        json={"value": "750.00"},
+    )
+    denied_download = client.get(
+        f"/clients/{client_b_id}/documents/{uploaded.json()['id']}/download",
+        headers=advisor_a_headers,
+    )
+    nonexistent_download = client.get(
+        "/clients/2147483647/documents/2147483647/download",
+        headers=advisor_a_headers,
+    )
+    assert denied_update.status_code == 404
+    assert denied_update.json() == nonexistent_update.json()
+    assert denied_download.status_code == 404
+    assert denied_download.json() == nonexistent_download.json()
 
 
 @pytest.mark.integration
 def test_admin_can_grant_patrimony_edit_and_write_is_audited(
     phase9_api_client, phase9_users
 ) -> None:
+    """Verifica concessão de permissão patrimonial e trilha de auditoria."""
     client = phase9_api_client
     users = phase9_users
     admin_headers = _authorization(client, users["admin"]["email"])
@@ -257,6 +358,7 @@ def test_admin_can_grant_patrimony_edit_and_write_is_audited(
     )
     assert permission_update.status_code == 200
     assert permission_update.json()["can_edit_patrimony"] is True
+    assert permission_update.json()["can_edit_goals"] is False
 
     created = client.post(
         f"/clients/{client_id}/patrimony",
@@ -269,16 +371,117 @@ def test_admin_can_grant_patrimony_edit_and_write_is_audited(
     )
     assert created.status_code == 201, created.text
 
+    updated = client.patch(
+        f"/clients/{client_id}/patrimony/{created.json()['id']}",
+        headers=client_headers,
+        json={"value": "1200.00"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["value"] == "1200.00"
+
     audit = client.get(f"/clients/{client_id}/audit-log", headers=admin_headers)
     assert audit.status_code == 200
     assert any(
         item["resource"] == "patrimony_item" and item["action"] == "create"
         for item in audit.json()
     )
+    assert any(
+        item["resource"] == "patrimony_item" and item["action"] == "update"
+        for item in audit.json()
+    )
+
+    goal_permission = client.put(
+        f"/clients/{client_id}/permissions",
+        headers=admin_headers,
+        json={"can_edit_goals": True},
+    )
+    assert goal_permission.status_code == 200, goal_permission.text
+    assert goal_permission.json()["can_edit_goals"] is True
+    assert goal_permission.json()["can_edit_patrimony"] is True
+    goal = client.post(
+        f"/clients/{client_id}/goals",
+        headers=client_headers,
+        json={"title": "Reserva para viagem", "target_value": "5000.00"},
+    )
+    assert goal.status_code == 201, goal.text
+    goal_updated = client.patch(
+        f"/clients/{client_id}/goals/{goal.json()['id']}",
+        headers=client_headers,
+        json={"current_value": "250.00"},
+    )
+    assert goal_updated.status_code == 200, goal_updated.text
+    refreshed_audit = client.get(
+        f"/clients/{client_id}/audit-log", headers=admin_headers
+    )
+    assert any(
+        item["resource"] == "goal" and item["action"] == action
+        for item in refreshed_audit.json()
+        for action in ("create", "update")
+    )
+
+
+@pytest.mark.integration
+def test_disabled_patrimony_and_goal_permissions_block_create_and_update(
+    phase9_api_client, phase9_users
+) -> None:
+    """Confirma que flags desligadas impedem criação e alteração sem mudar dados."""
+    client = phase9_api_client
+    users = phase9_users
+    client_id = users["client_a"]["id"]
+    advisor_headers = _authorization(client, users["advisor_a"]["email"])
+    client_headers = _authorization(client, users["client_a"]["email"])
+
+    patrimony = client.post(
+        f"/clients/{client_id}/patrimony",
+        headers=advisor_headers,
+        json={"category": "Reserva", "description": "Reserva base", "value": "1000.00"},
+    )
+    goal = client.post(
+        f"/clients/{client_id}/goals",
+        headers=advisor_headers,
+        json={"title": "Meta base", "target_value": "5000.00", "current_value": "500.00"},
+    )
+    assert patrimony.status_code == 201, patrimony.text
+    assert goal.status_code == 201, goal.text
+
+    denied_create_patrimony = client.post(
+        f"/clients/{client_id}/patrimony",
+        headers=client_headers,
+        json={"category": "Reserva", "description": "Nova reserva", "value": "50.00"},
+    )
+    denied_update_patrimony = client.patch(
+        f"/clients/{client_id}/patrimony/{patrimony.json()['id']}",
+        headers=client_headers,
+        json={"value": "2000.00"},
+    )
+    denied_create_goal = client.post(
+        f"/clients/{client_id}/goals",
+        headers=client_headers,
+        json={"title": "Nova meta", "target_value": "8000.00"},
+    )
+    denied_update_goal = client.patch(
+        f"/clients/{client_id}/goals/{goal.json()['id']}",
+        headers=client_headers,
+        json={"current_value": "900.00"},
+    )
+
+    assert [
+        denied_create_patrimony.status_code,
+        denied_update_patrimony.status_code,
+        denied_create_goal.status_code,
+        denied_update_goal.status_code,
+    ] == [403, 403, 403, 403]
+    patrimony_after = client.get(
+        f"/clients/{client_id}/patrimony", headers=client_headers
+    )
+    goals_after = client.get(f"/clients/{client_id}/goals", headers=client_headers)
+    assert patrimony_after.json()[0]["value"] == "1000.00"
+    assert goals_after.json()[0]["current_value"] == "500.00"
 
 
 @pytest.mark.integration
 def test_client_sees_only_published_reports(phase9_api_client, phase9_users) -> None:
+    """Verifica que o cliente não recebe relatórios em rascunho."""
     client = phase9_api_client
     users = phase9_users
     advisor_headers = _authorization(client, users["advisor_a"]["email"])
@@ -305,21 +508,31 @@ def test_client_sees_only_published_reports(phase9_api_client, phase9_users) -> 
     assert published.status_code == 201, published.text
 
     visible = client.get(f"/clients/{client_id}/reports", headers=client_headers)
+    advisor_visible = client.get(f"/clients/{client_id}/reports", headers=advisor_headers)
     hidden_draft = client.get(
         f"/clients/{client_id}/reports/{draft.json()['id']}", headers=client_headers
+    )
+    advisor_draft = client.get(
+        f"/clients/{client_id}/reports/{draft.json()['id']}", headers=advisor_headers
     )
     assert visible.status_code == 200
     assert [report["id"] for report in visible.json()] == [published.json()["id"]]
     assert hidden_draft.status_code == 404
+    assert {report["id"] for report in advisor_visible.json()} == {
+        draft.json()["id"], published.json()["id"]
+    }
+    assert advisor_draft.status_code == 200
 
 
 @pytest.mark.integration
 def test_advisor_uploads_document_for_assigned_client_and_client_downloads_it(
     phase9_api_client, phase9_users, monkeypatch, tmp_path
 ) -> None:
+    """Verifica envio autorizado pelo assessor e download pelo cliente vinculado."""
     from app.api import documents as documents_api
 
     monkeypatch.setattr(documents_api.settings, "storage_dir", str(tmp_path))
+    monkeypatch.setattr(documents_api, "scan_file", lambda _path: None)
     client = phase9_api_client
     users = phase9_users
     client_id = users["client_a"]["id"]
@@ -349,7 +562,7 @@ def test_advisor_uploads_document_for_assigned_client_and_client_downloads_it(
     assert [item["id"] for item in listed.json()] == [document_id]
     assert downloaded.status_code == 200
     assert downloaded.content == pdf_content
-    assert denied.status_code == 403
+    assert denied.status_code == 404
     assert audit.status_code == 200
     assert any(
         item["resource"] == "document"
@@ -384,6 +597,7 @@ def test_invalid_document_upload_leaves_no_file_or_record(
     content_type: str,
     expected_status: int,
 ) -> None:
+    """Verifica limpeza do arquivo e do registro após envio inválido."""
     from app.api import documents as documents_api
 
     monkeypatch.setattr(documents_api.settings, "storage_dir", str(tmp_path))
@@ -413,6 +627,7 @@ def test_invalid_document_upload_leaves_no_file_or_record(
 def test_suitability_snapshot_review_client_response_and_audit(
     phase9_api_client, phase9_users, phase9_session_factory
 ) -> None:
+    """Verifica o fluxo integrado de retrato financeiro, revisão, resposta e auditoria."""
     client = phase9_api_client
     users = phase9_users
     client_id = users["client_a"]["id"]
@@ -487,7 +702,7 @@ def test_suitability_snapshot_review_client_response_and_audit(
     pending_review = client.get(
         f"/clients/{client_id}/suitability", headers=advisor_headers
     )
-    assert cross_advisor_read.status_code == 403
+    assert cross_advisor_read.status_code == 404
     assert pending_review.status_code == 200
     assert pending_review.json()["id"] == assessment_id
 

@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class NotificationResponse(BaseModel):
+    """Notificação visível ao usuário e informações de leitura."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -15,5 +17,6 @@ class NotificationResponse(BaseModel):
     kind: str
     title: str
     message: str
+    # O timestamp é por destinatário e fica vazio enquanto o aviso não for lido.
     read_at: datetime | None
     created_at: datetime

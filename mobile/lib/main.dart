@@ -3,21 +3,27 @@
 // Os blocos abaixo estão organizados por responsabilidade para facilitar a manutenção.
 import 'dart:async';
 import 'dart:convert';
+// Arquivos locais e detecção de plataforma usam dart:io e exigem alternativa antes de habilitar Flutter Web.
 import 'dart:io' show File, Platform;
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 
+// Compartilhada entre a autenticação e a tela autenticada para invalidar cache ao trocar de conta.
+const clientCacheKey = 'talentum_client_cache';
+
 // Aplica máscara pt-BR e limita valores a duas casas decimais.
+/// Formata valores monetários durante a digitação, limitando as casas decimais.
 class TwoDecimalMoneyInputFormatter extends TextInputFormatter {
   const TwoDecimalMoneyInputFormatter();
 
+  /// Filtra caracteres inválidos e mantém no máximo duas casas decimais.
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -43,6 +49,7 @@ class TwoDecimalMoneyInputFormatter extends TextInputFormatter {
     final fractionSource = separatorIndex >= 0
         ? input.substring(separatorIndex + 1).replaceAll(RegExp(r'\D'), '')
         : '';
+    // Rejeita a edição inteira acima de duas casas; o protótipo RN trunca o excedente (achado 99).
     if (fractionSource.length > 2) return oldValue;
 
     final negative = integerSource.startsWith('-');
@@ -76,7 +83,7 @@ class TwoDecimalMoneyInputFormatter extends TextInputFormatter {
   }
 }
 
-// Converte entradas numéricas digitadas no padrão brasileiro para double.
+/// Converte entradas numéricas digitadas no padrão brasileiro para `double`.
 double? parseBrazilianNumber(String value) {
   final sanitized = value.trim().replaceAll(RegExp(r'[^0-9,.-]'), '');
   if (sanitized.isEmpty) return null;
@@ -88,6 +95,7 @@ double? parseBrazilianNumber(String value) {
 }
 
 // Formata valores com separador de milhares e casas decimais no padrão pt-BR.
+/// Formata um valor numérico com separadores usados no padrão brasileiro.
 String formatBrazilianNumber(dynamic value, {int fractionDigits = 2}) {
   final parsed = value is num
       ? value.toDouble()
@@ -107,6 +115,7 @@ String formatBrazilianNumber(dynamic value, {int fractionDigits = 2}) {
   return '$sign$groupedInteger${fractionDigits > 0 ? ',${parts[1]}' : ''}';
 }
 
+/// Converte uma data da API para a apresentação adotada pelo aplicativo.
 String formatApiDate(dynamic value) {
   final raw = value?.toString() ?? '';
   return RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(raw)
@@ -114,7 +123,8 @@ String formatApiDate(dynamic value) {
       : raw;
 }
 
-// Exibe cotas com até oito casas, omitindo zeros decimais à direita.
+// Quantidades da API aceitam até oito casas; a notação científica é expandida até esse limite.
+/// Apresenta cotas inteiras sem casas e remove zeros finais de cotas fracionadas.
 String formatInvestmentQuantity(dynamic value) {
   if (value == null) return '0';
   final raw = value.toString().trim().replaceAll(',', '.');
@@ -127,20 +137,24 @@ String formatInvestmentQuantity(dynamic value) {
   return fraction.isEmpty ? parts.first : '${parts.first},$fraction';
 }
 
-const biometricEnabledKey = 'talentum_biometric_enabled';
+const biometricEnabledKey =
+    'talentum_biometric_enabled'; // Chave local da preferência de autenticação biométrica.
 
 // Consulta os recursos biométricos disponíveis antes de exibir ações de login.
+/// Verifica se o dispositivo oferece autenticação biométrica.
 Future<bool> deviceSupportsBiometrics() async {
   try {
     final authentication = LocalAuthentication();
     if (!await authentication.isDeviceSupported()) return false;
     return (await authentication.getAvailableBiometrics()).isNotEmpty;
   } catch (_) {
+    // Uma falha do plugin é tratada como biometria indisponível e oculta a opção.
     return false;
   }
 }
 
 // Mantém a tradução dos tipos internos de documento para os rótulos da interface.
+/// Converte o código do tipo de documento em um rótulo para a interface.
 String documentKindLabel(dynamic kind) => switch (kind?.toString()) {
       'identification' => 'Identificação',
       'income_proof' => 'Comprovante de renda',
@@ -149,72 +163,355 @@ String documentKindLabel(dynamic kind) => switch (kind?.toString()) {
     };
 
 const configuredApiUrl = String.fromEnvironment('API_URL');
+// O fallback usa HTTP: só o manifesto debug Android libera essa exceção; os demais builds precisam de URL HTTPS apropriada.
 final apiUrl = configuredApiUrl.isNotEmpty
     ? configuredApiUrl
     : Platform.isAndroid
         ? 'http://10.0.2.2:8000'
         : 'http://127.0.0.1:8000';
 
+/// Reúne as cores principais usadas para manter a identidade visual do aplicativo.
+class TalentumColors {
+  static const petrol = Color(0xff17324d);
+  static const teal = Color(0xff167c76);
+  static const silver = Color(0xffb8c3ca);
+  static const ink = Color(0xff1f2b35);
+  static const muted = Color(0xff63717d);
+  static const line = Color(0xffdce4e8);
+  static const background = Color(0xfff7f9fa);
+  static const mist = Color(0xffe8eff2);
+  static const error = Color(0xffb84a5c);
+  static const gold = Color(0xffc78a30);
+  static const coral = Color(0xffc95f6d);
+  static const blue = Color(0xff4a82b8);
+}
+
 // Inicializa preferências, restaura a sessão segura e monta a árvore Flutter.
+/// Inicializa os serviços necessários e executa o aplicativo Flutter.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // As preferências também são carregadas antes da interface e podem interromper a inicialização (achado 202).
   final preferences = await SharedPreferences.getInstance();
   final api = ApiClient(
       baseUrl: apiUrl,
       preferences: preferences,
       secureStorage: PlatformSecureValueStore());
+  // Restaura os tokens antes da primeira tela; falha do storage ainda não tem recuperação visual (achado 202).
   await api.restoreSession();
   runApp(TalentumApp(api: api));
 }
 
 // Tema e ponto de entrada visual compartilhado por todas as telas do aplicativo.
+/// Configura tema, rotas iniciais e estrutura global do aplicativo.
 class TalentumApp extends StatelessWidget {
   const TalentumApp({super.key, required this.api});
 
   final ApiClient api;
 
+  /// Monta o tema global e disponibiliza o cliente da API à navegação do app.
   @override
   Widget build(BuildContext context) {
+    const brandScheme = ColorScheme.light(
+      primary: TalentumColors.petrol,
+      onPrimary: Colors.white,
+      primaryContainer: TalentumColors.mist,
+      onPrimaryContainer: TalentumColors.petrol,
+      secondary: TalentumColors.teal,
+      onSecondary: Colors.white,
+      secondaryContainer: Color(0xffdcefeb),
+      onSecondaryContainer: Color(0xff124d49),
+      tertiary: TalentumColors.gold,
+      onTertiary: Colors.white,
+      error: TalentumColors.error,
+      onError: Colors.white,
+      surface: Color(0xfffdfefe),
+      onSurface: TalentumColors.ink,
+      outline: TalentumColors.silver,
+      outlineVariant: TalentumColors.line,
+    );
+    const fieldBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(12)),
+      borderSide: BorderSide(color: TalentumColors.line),
+    );
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Talentum',
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.dark.copyWith(
+          statusBarColor: TalentumColors.background,
+          systemNavigationBarColor: TalentumColors.background,
+          systemNavigationBarIconBrightness: Brightness.dark,
+          systemNavigationBarDividerColor: TalentumColors.line,
+        ),
+        child: child ?? const SizedBox.shrink(),
+      ),
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff5d4bc4)),
-        scaffoldBackgroundColor: const Color(0xfffaf9f6),
         useMaterial3: true,
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
+        colorScheme: brandScheme,
+        scaffoldBackgroundColor: TalentumColors.background,
+        textTheme: ThemeData.light().textTheme.apply(
+              bodyColor: TalentumColors.ink,
+              displayColor: TalentumColors.ink,
+              fontFamily: 'Roboto',
+            ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: TalentumColors.background,
+          foregroundColor: TalentumColors.petrol,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          titleSpacing: 16,
+          iconTheme: IconThemeData(color: TalentumColors.petrol),
+          actionsIconTheme: IconThemeData(color: TalentumColors.petrol),
+          systemOverlayStyle: SystemUiOverlayStyle.dark,
+        ),
+        cardTheme: CardThemeData(
+          color: brandScheme.surface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          margin: const EdgeInsets.only(bottom: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: TalentumColors.line),
+          ),
+        ),
+        dividerTheme: const DividerThemeData(
+          color: TalentumColors.line,
+          thickness: 1,
+          space: 24,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: brandScheme.surface,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+          border: fieldBorder,
+          enabledBorder: fieldBorder,
+          focusedBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: TalentumColors.petrol, width: 1.6),
+          ),
+          errorBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: TalentumColors.error),
+          ),
+          focusedErrorBorder: const OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide: BorderSide(color: TalentumColors.error, width: 1.6),
+          ),
+          labelStyle: const TextStyle(color: TalentumColors.muted),
+          hintStyle: const TextStyle(color: TalentumColors.muted),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(48, 50),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(44, 46),
+            foregroundColor: TalentumColors.petrol,
+            side: const BorderSide(color: TalentumColors.silver),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: brandScheme.surface,
+          indicatorColor: TalentumColors.mist,
+          surfaceTintColor: Colors.transparent,
+          elevation: 4,
+          height: 72,
+          labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+                color: states.contains(WidgetState.selected)
+                    ? TalentumColors.petrol
+                    : TalentumColors.muted,
+                fontWeight: states.contains(WidgetState.selected)
+                    ? FontWeight.w700
+                    : FontWeight.w500,
+                fontSize: 12,
+              )),
+          iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+                color: states.contains(WidgetState.selected)
+                    ? TalentumColors.petrol
+                    : TalentumColors.muted,
+              )),
+        ),
+        snackBarTheme: SnackBarThemeData(
+          backgroundColor: TalentumColors.petrol,
+          contentTextStyle: const TextStyle(color: Colors.white),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          behavior: SnackBarBehavior.floating,
         ),
       ),
-      home: LoginScreen(api: api),
+      home: TalentumSplashScreen(api: api),
+    );
+  }
+}
+
+/// Apresenta a identidade visual durante a abertura do aplicativo.
+class TalentumSplashScreen extends StatefulWidget {
+  const TalentumSplashScreen({super.key, required this.api});
+
+  final ApiClient api;
+
+  /// Cria o estado que controla a transição da abertura para o login.
+  @override
+  State<TalentumSplashScreen> createState() => _TalentumSplashScreenState();
+}
+
+/// Controla a exibição e o tempo da tela inicial da marca.
+class _TalentumSplashScreenState extends State<TalentumSplashScreen> {
+  Timer? _transitionTimer;
+
+  /// Inicializa dados e tarefas que dependem da criação do estado da tela.
+  @override
+  void initState() {
+    super.initState();
+    // Mantém a marca visível por um breve intervalo antes de abrir o login.
+    _transitionTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(api: widget.api),
+      ));
+    });
+  }
+
+  /// Libera controladores e recursos mantidos enquanto a tela esteve aberta.
+  @override
+  void dispose() {
+    _transitionTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Exibe a abertura animada e aplica as cores da barra de status e navegação.
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: TalentumColors.petrol,
+        systemNavigationBarColor: TalentumColors.petrol,
+        systemNavigationBarIconBrightness: Brightness.light,
+        systemNavigationBarDividerColor: TalentumColors.petrol,
+      ),
+      child: Scaffold(
+        backgroundColor: TalentumColors.petrol,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset(
+                'assets/brand/talentum-moeda-prata.png',
+                width: 84,
+                height: 84,
+                fit: BoxFit.contain,
+                semanticLabel: 'Logo Talentum',
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                'talentum',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.6,
+                ),
+              ),
+              const SizedBox(height: 28),
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Exibe a marca Talentum com o tratamento visual compartilhado entre telas.
+class _TalentumBrandLockup extends StatelessWidget {
+  const _TalentumBrandLockup({this.markSize = 40, this.fontSize = 21});
+
+  final double markSize;
+  final double fontSize;
+
+  /// Renderiza o símbolo e o nome Talentum nas dimensões solicitadas.
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Talentum',
+      image: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset(
+            'assets/brand/talentum-moeda-prata.png',
+            width: markSize,
+            height: markSize,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(width: 9),
+          Text(
+            'talentum',
+            style: TextStyle(
+              color: TalentumColors.petrol,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 // Tela inicial: autenticação por senha e, quando habilitada, biometria.
+/// Representa a tela de autenticação do usuário.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.api, this.message});
 
   final ApiClient api;
   final String? message;
 
+  /// Cria o estado que controla os campos e o envio do login.
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+/// Desenha o gráfico circular de distribuição da carteira.
 class InvestmentDonutPainter extends CustomPainter {
   InvestmentDonutPainter({required this.values});
 
   final List<double> values;
+  // A paleta tem oito cores; o operador módulo reutiliza cores em carteiras maiores (achado 97).
   static const colors = <Color>[
-    Color(0xff5d4bc4), Color(0xff20a58a), Color(0xfff0a43a),
-    Color(0xffe45b73), Color(0xff4195d3), Color(0xff8769b4),
-    Color(0xff94b84b), Color(0xffe17c3e),
+    TalentumColors.petrol,
+    TalentumColors.teal,
+    TalentumColors.gold,
+    TalentumColors.coral,
+    TalentumColors.blue,
+    TalentumColors.silver,
+    Color(0xff55a66e),
+    Color(0xffd07842),
   ];
 
+  /// Desenha o gráfico customizado dentro dos limites disponíveis.
   @override
   void paint(Canvas canvas, Size size) {
     final total = values.fold<double>(0, (sum, value) => sum + value);
+    // Evita calcular arcos proporcionais quando a soma das fatias não é positiva.
     if (total <= 0) return;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.shortestSide / 2;
@@ -229,11 +526,13 @@ class InvestmentDonutPainter extends CustomPainter {
     canvas.drawCircle(center, radius * .59, Paint()..color = Colors.white);
   }
 
+  /// Indica se as novas propriedades exigem redesenhar o gráfico.
   @override
   bool shouldRepaint(covariant InvestmentDonutPainter oldDelegate) =>
       oldDelegate.values != values;
 }
 
+/// Apresenta a evolução mensal da carteira em um gráfico de linhas.
 class MonthlyInvestmentLineChart extends StatelessWidget {
   const MonthlyInvestmentLineChart({
     super.key,
@@ -244,9 +543,11 @@ class MonthlyInvestmentLineChart extends StatelessWidget {
   final List<dynamic> points;
   final bool showCdi;
 
+  /// Exibe a série mensal, as datas cobertas e a legenda das linhas do gráfico.
   @override
   Widget build(BuildContext context) {
     if (points.isEmpty) return const SizedBox.shrink();
+    // A API ordena os pontos por data; os extremos mostram o intervalo efetivamente coberto.
     final firstDate = points.first['date']?.toString() ?? '';
     final lastDate = points.last['date']?.toString() ?? '';
     return Padding(
@@ -264,6 +565,7 @@ class MonthlyInvestmentLineChart extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // O eixo mostra mês-dia extraídos da ISO; avaliar usar formatApiDate para respeitar pt-BR.
               Text(firstDate.length >= 10 ? firstDate.substring(5, 10) : ''),
               Text(lastDate.length >= 10 ? lastDate.substring(5, 10) : ''),
             ],
@@ -272,9 +574,10 @@ class MonthlyInvestmentLineChart extends StatelessWidget {
           Wrap(
             spacing: 16,
             children: [
-              const _ChartLegend(color: Color(0xff5d4bc4), label: 'Carteira'),
+              const _ChartLegend(
+                  color: TalentumColors.petrol, label: 'Carteira'),
               if (showCdi)
-                const _ChartLegend(color: Color(0xff20a58a), label: 'CDI'),
+                const _ChartLegend(color: TalentumColors.teal, label: 'CDI'),
             ],
           ),
         ],
@@ -283,11 +586,13 @@ class MonthlyInvestmentLineChart extends StatelessWidget {
   }
 }
 
+/// Mostra a legenda de séries do gráfico mensal.
 class _ChartLegend extends StatelessWidget {
   const _ChartLegend({required this.color, required this.label});
   final Color color;
   final String label;
 
+  /// Monta a amostra colorida e o nome da série do gráfico mensal.
   @override
   Widget build(BuildContext context) => Row(
         mainAxisSize: MainAxisSize.min,
@@ -299,19 +604,23 @@ class _ChartLegend extends StatelessWidget {
       );
 }
 
+/// Desenha as séries e a grade do gráfico de desempenho mensal.
 class MonthlyInvestmentChartPainter extends CustomPainter {
   MonthlyInvestmentChartPainter({required this.points, required this.showCdi});
 
   final List<dynamic> points;
   final bool showCdi;
 
+  /// Obtém um valor numérico de um ponto da série com fallback seguro.
   double _value(dynamic item, String key) =>
       double.tryParse(item[key]?.toString() ?? '') ?? 0;
 
+  /// Desenha o gráfico customizado dentro dos limites disponíveis.
   @override
   void paint(Canvas canvas, Size size) {
     const horizontalPadding = 10.0;
     const verticalPadding = 12.0;
+    // Inclui o ponto de equilíbrio no eixo para contextualizar retornos positivos e negativos.
     final values = <double>[0];
     for (final point in points) {
       values.add(_value(point, 'return_percent'));
@@ -321,14 +630,20 @@ class MonthlyInvestmentChartPainter extends CustomPainter {
     }
     var minimum = values.reduce((a, b) => a < b ? a : b);
     var maximum = values.reduce((a, b) => a > b ? a : b);
+    // Expande séries quase planas para que pequenas variações ainda apareçam no desenho.
     if (maximum - minimum < .15) {
       maximum += .1;
       minimum -= .1;
     }
     final plotWidth = size.width - horizontalPadding * 2;
     final plotHeight = size.height - verticalPadding * 2;
-    double x(int index) => horizontalPadding +
+
+    /// Converte o índice do ponto em uma coordenada horizontal do gráfico.
+    double x(int index) =>
+        horizontalPadding +
         (points.length <= 1 ? 0 : index * plotWidth / (points.length - 1));
+
+    /// Converte um valor da série em uma coordenada vertical do gráfico.
     double y(double value) =>
         verticalPadding + (maximum - value) * plotHeight / (maximum - minimum);
 
@@ -336,14 +651,17 @@ class MonthlyInvestmentChartPainter extends CustomPainter {
       Offset(horizontalPadding, y(0)),
       Offset(size.width - horizontalPadding, y(0)),
       Paint()
-        ..color = const Color(0xffd9d6e2)
+        ..color = TalentumColors.line
         ..strokeWidth = 1,
     );
+
+    /// Desenha os pontos e segmentos de uma série com a cor informada.
     void drawSeries(String key, Color color) {
       final path = Path();
       var started = false;
       for (var index = 0; index < points.length; index++) {
         final point = points[index];
+        // O CDI pode faltar antes da primeira taxa publicada; a linha começa no primeiro ponto disponível.
         if (point[key] == null) continue;
         final offset = Offset(x(index), y(_value(point, key)));
         if (!started) {
@@ -364,15 +682,17 @@ class MonthlyInvestmentChartPainter extends CustomPainter {
       );
     }
 
-    drawSeries('return_percent', const Color(0xff5d4bc4));
-    if (showCdi) drawSeries('cdi_return_percent', const Color(0xff20a58a));
+    drawSeries('return_percent', TalentumColors.petrol);
+    if (showCdi) drawSeries('cdi_return_percent', TalentumColors.teal);
   }
 
+  /// Indica se as novas propriedades exigem redesenhar o gráfico.
   @override
   bool shouldRepaint(covariant MonthlyInvestmentChartPainter oldDelegate) =>
       oldDelegate.points != points || oldDelegate.showCdi != showCdi;
 }
 
+/// Controla autenticação, biometria e estado da tela de login.
 class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
@@ -383,6 +703,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? error;
   final localAuthentication = LocalAuthentication();
 
+  /// Inicializa dados e tarefas que dependem da criação do estado da tela.
   @override
   void initState() {
     super.initState();
@@ -391,6 +712,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Carrega a preferência local sem assumir que a sessão ainda está válida.
+  /// Carrega a disponibilidade e a preferência biométrica do dispositivo.
   Future<void> _loadBiometricStatus() async {
     final enabled =
         widget.api.preferences.getBool(biometricEnabledKey) ?? false;
@@ -403,6 +725,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  /// Libera controladores e recursos mantidos enquanto a tela esteve aberta.
   @override
   void dispose() {
     email.dispose();
@@ -411,6 +734,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Valida os campos, autentica na API e navega para a área do cliente.
+  /// Valida as credenciais e inicia a sessão pela API.
   Future<void> submit() async {
     if (loading) return;
     final normalizedEmail = email.text.trim();
@@ -418,6 +742,7 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => error = 'Informe um e-mail válido.');
       return;
     }
+    // A API também exige até 128 caracteres; o formulário só barra senha vazia (achado 67).
     if (password.text.isEmpty) {
       setState(() => error = 'Informe sua senha.');
       return;
@@ -428,6 +753,8 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await widget.api.login(normalizedEmail, password.text);
+      // Uma nova autenticação pode pertencer a outra conta; não reaproveita dados do usuário anterior.
+      await widget.api.secureStorage.delete(clientCacheKey);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => HomeScreen(api: widget.api)),
@@ -435,6 +762,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } on ApiException catch (exception) {
       setState(() => error = exception.message);
     } catch (_) {
+      // Também recebe falhas do armazenamento seguro, mas as mostra como erro de conexão.
       setState(() => error = 'Não foi possível conectar à API.');
     } finally {
       if (mounted) setState(() => loading = false);
@@ -442,6 +770,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // Desbloqueia uma sessão salva usando a biometria do dispositivo.
+  /// Autentica o usuário usando a sessão biométrica já configurada.
   Future<void> submitWithBiometrics() async {
     if (loading || !biometricAvailable || !widget.api.hasStoredSession) return;
     setState(() {
@@ -461,6 +790,7 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(builder: (_) => HomeScreen(api: widget.api)),
       );
     } on ApiException {
+      // Qualquer erro da consulta à API, inclusive indisponibilidade transitória, apaga a sessão biométrica salva.
       await widget.api.clearSession();
       if (mounted) {
         setState(
@@ -475,6 +805,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// Monta a tela de acesso com validação, opção biométrica e estados de erro.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -484,74 +815,128 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.all(28),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 430),
-              child: Card(
-                elevation: 0,
-                child: Padding(
-                  padding: const EdgeInsets.all(28),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Image.asset('assets/brand/talentum-web-logo.png',
-                          width: 200, height: 48),
-                      const SizedBox(height: 28),
-                      Text('Sua jornada financeira começa aqui.',
-                          style: Theme.of(context).textTheme.headlineSmall),
-                      const SizedBox(height: 8),
-                      const Text(
-                          'Acompanhe seu patrimônio, metas e relatórios.'),
-                      const SizedBox(height: 28),
-                      TextField(
-                          controller: email,
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                          autocorrect: false,
-                          decoration:
-                              const InputDecoration(labelText: 'E-mail')),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: password,
-                        obscureText: obscurePassword,
-                        textInputAction: TextInputAction.done,
-                        enableSuggestions: false,
-                        decoration: InputDecoration(
-                          labelText: 'Senha',
-                          suffixIcon: IconButton(
-                            tooltip: obscurePassword
-                                ? 'Exibir senha'
-                                : 'Ocultar senha',
-                            onPressed: () => setState(
-                                () => obscurePassword = !obscurePassword),
-                            icon: Icon(obscurePassword
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined),
-                          ),
-                        ),
-                        onSubmitted: (_) => submit(),
-                      ),
-                      if (error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(error!, style: const TextStyle(color: Colors.red)),
-                      ],
-                      const SizedBox(height: 22),
-                      FilledButton(
-                          onPressed: loading ? null : submit,
-                          child: Text(loading ? 'Entrando...' : 'Entrar')),
-                      if (biometricAvailable && biometricEnabled) ...[
-                        const SizedBox(height: 10),
-                        OutlinedButton.icon(
-                          onPressed: loading ? null : submitWithBiometrics,
-                          icon: const Icon(Icons.fingerprint),
-                          label: const Text('Entrar com biometria'),
-                        ),
-                      ],
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Por segurança, a senha é solicitada sempre que o aplicativo é aberto.',
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Center(
+                    child: _TalentumBrandLockup(markSize: 72, fontSize: 28),
                   ),
-                ),
+                  const SizedBox(height: 28),
+                  Text(
+                    'Seu patrimônio, acompanhado com clareza.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          color: TalentumColors.petrol,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Carteira, metas e planejamento financeiro em um só lugar.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: TalentumColors.muted,
+                          height: 1.45,
+                        ),
+                  ),
+                  const SizedBox(height: 26),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text('Acesse sua conta',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 5),
+                          Text('Entre para acompanhar sua vida financeira.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: TalentumColors.muted)),
+                          const SizedBox(height: 20),
+                          TextField(
+                              controller: email,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autocorrect: false,
+                              decoration:
+                                  const InputDecoration(labelText: 'E-mail')),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: password,
+                            obscureText: obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            enableSuggestions: false,
+                            decoration: InputDecoration(
+                              labelText: 'Senha',
+                              suffixIcon: IconButton(
+                                tooltip: obscurePassword
+                                    ? 'Exibir senha'
+                                    : 'Ocultar senha',
+                                onPressed: () => setState(
+                                    () => obscurePassword = !obscurePassword),
+                                icon: Icon(obscurePassword
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined),
+                              ),
+                            ),
+                            onSubmitted: (_) => submit(),
+                          ),
+                          if (error != null) ...[
+                            // Texto não é região viva e pode não ser anunciado ao aparecer (achado 207).
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xffffeff1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.error_outline,
+                                      color: TalentumColors.error, size: 19),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(error!,
+                                        style: const TextStyle(
+                                            color: TalentumColors.error)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          FilledButton(
+                              onPressed: loading ? null : submit,
+                              child: Text(loading ? 'Entrando...' : 'Entrar')),
+                          if (biometricAvailable && biometricEnabled) ...[
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              onPressed: loading ? null : submitWithBiometrics,
+                              icon: const Icon(Icons.fingerprint),
+                              label: const Text('Entrar com biometria'),
+                            ),
+                          ],
+                          const SizedBox(height: 14),
+                          Text(
+                            'Acesso protegido. Sua senha é solicitada sempre que o app é aberto.', // O login biométrico permite entrar sem redigitá-la (achado 209).
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: TalentumColors.muted),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -562,19 +947,21 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // Área autenticada do cliente: carrega dados, controla abas e edita recursos.
+/// Define a tela principal e seus parâmetros de navegação.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.api});
 
   final ApiClient api;
 
+  /// Cria o estado compartilhado da navegação e dos dados do cliente.
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+/// Mantém os dados, filtros e ações das áreas do aplicativo do cliente.
 class _HomeScreenState extends State<HomeScreen> {
   // Preferências e cache local permitem preservar a experiência em falhas temporárias.
   static const hideValuesKey = 'talentum_hide_values';
-  static const clientCacheKey = 'talentum_client_cache';
   static const defaultNotificationPreferences = <String, dynamic>{
     'action_overdue': true,
     'action_due_soon': true,
@@ -587,6 +974,10 @@ class _HomeScreenState extends State<HomeScreen> {
   int tab = 0;
   String goalFilter = 'all';
   String notificationFilter = 'all';
+  String investmentTransactionPeriod = 'all';
+  String investmentTransactionType = 'all';
+  final TextEditingController investmentTransactionSymbolController =
+      TextEditingController();
   bool hideValues = false;
   Map<String, dynamic>? user;
   Map<String, dynamic>? dashboard;
@@ -610,30 +1001,39 @@ class _HomeScreenState extends State<HomeScreen> {
   bool loading = false;
   bool documentBusy = false;
   bool investmentReportBusy = false;
+  bool investmentTransactionsBusy = false;
+  bool investmentTransactionsHasMore = false;
+  String? investmentTransactionsError;
   bool biometricAvailable = false;
   bool biometricEnabled = false;
   String? cachedAt;
   Timer? monthlyPerformanceTimer;
 
   // Carrega preferências e dispara a leitura inicial dos dados protegidos.
+  /// Inicializa dados e tarefas que dependem da criação do estado da tela.
   @override
   void initState() {
     super.initState();
     hideValues = widget.api.preferences.getBool(hideValuesKey) ?? false;
     _loadBiometricStatus();
     load();
+    // Atualiza rendimento e CDI a cada hora sem recarregar os demais módulos da carteira.
     monthlyPerformanceTimer = Timer.periodic(const Duration(hours: 1), (_) {
       final clientId = user?['id'];
-      if (clientId is int) unawaited(_loadInvestmentMonthlyPerformance(clientId));
+      if (clientId is int)
+        unawaited(_loadInvestmentMonthlyPerformance(clientId));
     });
   }
 
+  /// Libera controladores e recursos mantidos enquanto a tela esteve aberta.
   @override
   void dispose() {
     monthlyPerformanceTimer?.cancel();
+    investmentTransactionSymbolController.dispose();
     super.dispose();
   }
 
+  /// Carrega a disponibilidade e a preferência biométrica do dispositivo.
   Future<void> _loadBiometricStatus() async {
     final available = await deviceSupportsBiometrics();
     if (!mounted) return;
@@ -644,6 +1044,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// Alterna o uso de biometria para entrar no aplicativo.
   Future<void> _toggleBiometric() async {
     if (!biometricAvailable) {
       if (mounted) {
@@ -654,6 +1055,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (biometricEnabled) {
+      // Este ramo não verifica o resultado nem captura exceções da gravação (achado 185).
       await widget.api.preferences.setBool(biometricEnabledKey, false);
       if (mounted) setState(() => biometricEnabled = false);
       return;
@@ -666,6 +1068,7 @@ class _HomeScreenState extends State<HomeScreen> {
         persistAcrossBackgrounding: true,
       );
       if (!authenticated) return;
+      // setBool pode retornar false sem lançar; o estado abaixo ainda será marcado como ativo (achado 185).
       await widget.api.preferences.setBool(biometricEnabledKey, true);
       if (mounted) {
         setState(() => biometricEnabled = true);
@@ -673,6 +1076,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SnackBar(content: Text('Acesso biométrico ativado.')));
       }
     } catch (_) {
+      // Captura exceções da autenticação/gravação, mas não um resultado false de setBool (achado 185).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Não foi possível ativar a biometria.')));
@@ -680,14 +1084,128 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Formata a data selecionada no padrão esperado pelo filtro da API.
+  String _transactionApiDate(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  /// Busca uma página de operações respeitando os filtros atuais.
+  Future<List<dynamic>> _loadInvestmentTransactions(int clientId,
+      {int offset = 0}) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    // Os períodos de 30 e 90 dias incluem o dia atual na contagem.
+    final DateTime? dateFrom = switch (investmentTransactionPeriod) {
+      '30d' => today.subtract(const Duration(days: 29)),
+      '90d' => today.subtract(const Duration(days: 89)),
+      'ytd' => DateTime(today.year),
+      _ => null,
+    };
+    final operationType =
+        investmentTransactionType == 'all' ? null : investmentTransactionType;
+    return widget.api.investmentTransactions(
+      clientId,
+      symbol: investmentTransactionSymbolController.text,
+      operationType: operationType,
+      dateFrom: dateFrom == null ? null : _transactionApiDate(dateFrom),
+      dateTo: dateFrom == null ? null : _transactionApiDate(today),
+      offset: offset,
+    );
+  }
+
+  /// Reinicia o histórico de operações com os filtros selecionados.
+  Future<void> refreshInvestmentTransactions() async {
+    final clientId = user?['id'];
+    if (clientId is! int || investmentTransactionsBusy) return;
+    setState(() {
+      investmentTransactionsBusy = true;
+      investmentTransactionsError = null;
+    });
+    try {
+      final transactions = await _loadInvestmentTransactions(clientId);
+      if (!mounted) return;
+      setState(() {
+        investmentTransactions = transactions;
+        investmentTransactionsHasMore = transactions.length ==
+            100; // Página cheia sugere continuação; um total múltiplo de 100 pode exibir uma carga extra.
+      });
+    } on ApiException catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        investmentTransactionsError =
+            exception.statusCode == 0 || exception.statusCode >= 500
+                ? 'Sem conexão para atualizar as operações. Tente novamente.'
+                : 'Não foi possível carregar as operações.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => investmentTransactionsError =
+          'Não foi possível carregar as operações. Tente novamente.');
+    } finally {
+      if (mounted) setState(() => investmentTransactionsBusy = false);
+    }
+  }
+
+  /// Carrega a próxima página do histórico sem descartar os resultados atuais.
+  Future<void> loadMoreInvestmentTransactions() async {
+    final clientId = user?['id'];
+    if (clientId is! int ||
+        investmentTransactionsBusy ||
+        !investmentTransactionsHasMore) return;
+    setState(() {
+      investmentTransactionsBusy = true;
+      investmentTransactionsError = null;
+    });
+    try {
+      final transactions = await _loadInvestmentTransactions(clientId,
+          offset: investmentTransactions.length);
+      if (!mounted) return;
+      setState(() {
+        investmentTransactions = [...investmentTransactions, ...transactions];
+        investmentTransactionsHasMore = transactions.length ==
+            100; // A API não informa total; a próxima resposta vazia encerra a paginação.
+      });
+    } on ApiException catch (exception) {
+      if (!mounted) return;
+      setState(() {
+        investmentTransactionsError =
+            exception.statusCode == 0 || exception.statusCode >= 500
+                ? 'Sem conexão para carregar mais operações. Tente novamente.'
+                : 'Não foi possível carregar mais operações.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => investmentTransactionsError =
+          'Não foi possível carregar mais operações. Tente novamente.');
+    } finally {
+      if (mounted) setState(() => investmentTransactionsBusy = false);
+    }
+  }
+
+  /// Remove filtros e recarrega o histórico completo de operações.
+  Future<void> clearInvestmentTransactionFilters() async {
+    setState(() {
+      investmentTransactionPeriod = 'all';
+      investmentTransactionType = 'all';
+      investmentTransactionSymbolController.clear();
+      investmentTransactionsHasMore = false;
+    });
+    await refreshInvestmentTransactions();
+  }
+
   // Busca o usuário e os módulos independentes em paralelo para reduzir a espera.
+  /// Carrega os dados necessários para atualizar as áreas da tela principal.
   Future<void> load() async {
+    // Descarta uma nova carga em andamento, inclusive as solicitadas após uma gravação (achado 28).
     if (loading) return;
+    int? authenticatedClientId;
     if (mounted) setState(() => loading = true);
     try {
       if (mounted) setState(() => error = null);
       final currentUser = await widget.api.me();
       final role = currentUser['role']?.toString();
+      // As áreas e os endpoints seguintes pertencem ao fluxo de cliente, não ao Advisor.
       if (role != 'client') {
         if (!mounted) return;
         setState(() {
@@ -699,6 +1217,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       final id = currentUser['id'] as int;
+      authenticatedClientId = id;
+      // Future.wait falha como conjunto: uma consulta obrigatória com erro leva ao fallback geral abaixo.
       final results = await Future.wait<dynamic>([
         widget.api.dashboard(id),
         widget.api.investmentPortfolio(id),
@@ -712,7 +1232,7 @@ class _HomeScreenState extends State<HomeScreen> {
         widget.api.actionPlan(id),
         _loadNotifications(),
         _loadNotificationPreferences(),
-        widget.api.investmentTransactions(id),
+        _loadInvestmentTransactions(id),
       ]);
       if (!mounted) return;
       setState(() {
@@ -731,6 +1251,7 @@ class _HomeScreenState extends State<HomeScreen> {
         notifications = results[10] as List<dynamic>;
         notificationPreferences = results[11] as Map<String, dynamic>;
         investmentTransactions = results[12] as List<dynamic>;
+        investmentTransactionsHasMore = investmentTransactions.length == 100;
       });
       final alerts = await _loadMarketAlerts();
       if (mounted) setState(() => marketAlerts = alerts);
@@ -740,7 +1261,11 @@ class _HomeScreenState extends State<HomeScreen> {
       unawaited(_loadInvestmentMonthlyPerformance(id));
     } on ApiException catch (exception) {
       if (widget.api.accessToken == null) {
-        await widget.api.secureStorage.delete(clientCacheKey);
+        try {
+          await widget.api.secureStorage.delete(clientCacheKey);
+        } catch (_) {
+          // A falha no storage não mantém a tela autenticada após a sessão ser invalidada.
+        }
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
@@ -752,8 +1277,9 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         return;
       }
+      // Usa o cache somente em falhas de conexão/servidor, não em erros funcionais da API.
       if ((exception.statusCode == 0 || exception.statusCode >= 500) &&
-          await _restoreClientCache()) {
+          await _restoreClientCache(expectedUserId: authenticatedClientId)) {
         if (!mounted) return;
         setState(() => error = null);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -767,7 +1293,9 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() => error = exception.message);
       }
     } catch (_) {
-      if (widget.api.accessToken != null && await _restoreClientCache()) {
+      // Também trata erros inesperados como indisponibilidade se houver cache (achado 186).
+      if (widget.api.accessToken != null &&
+          await _restoreClientCache(expectedUserId: authenticatedClientId)) {
         if (!mounted) return;
         setState(() => error = null);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -785,38 +1313,47 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Consulta notificações e atualiza a lista apresentada ao usuário.
   Future<List<dynamic>> _loadNotifications() async {
     try {
       return await widget.api.notifications();
     } catch (_) {
+      // Fallback atual: erro do endpoint aparece como lista sem notificações.
       return <dynamic>[];
     }
   }
 
+  /// Carrega opções de recebimento de notificações.
   Future<Map<String, dynamic>> _loadNotificationPreferences() async {
     try {
       return await widget.api.notificationPreferences();
     } catch (_) {
+      // Usa padrões sem distinguir falha de leitura; salvar a tela inteira pode sobrescrever preferências (achado 31).
       return Map<String, dynamic>.from(defaultNotificationPreferences);
     }
   }
 
+  /// Busca alertas de preço vinculados à carteira do usuário.
   Future<List<dynamic>> _loadMarketAlerts() async {
     try {
       return await widget.api.marketAlerts();
     } catch (_) {
+      // Fallback atual: falha na consulta é apresentada como ausência de alertas.
       return <dynamic>[];
     }
   }
 
+  /// Consulta a avaliação de perfil mais recente do usuário.
   Future<Map<String, dynamic>?> _loadSuitability() async {
     try {
       return await widget.api.suitability();
     } catch (_) {
+      // Fallback atual: falha na consulta é apresentada como avaliação inexistente.
       return null;
     }
   }
 
+  /// Atualiza a série mensal de desempenho da carteira.
   Future<void> _loadInvestmentMonthlyPerformance(int clientId) async {
     try {
       final result = await widget.api.investmentMonthlyPerformance(clientId);
@@ -830,17 +1367,20 @@ class _HomeScreenState extends State<HomeScreen> {
         if (raw != null) {
           final cache = jsonDecode(raw) as Map<String, dynamic>;
           cache['investment_monthly_performance'] = result;
-          await widget.api.secureStorage.write(clientCacheKey, jsonEncode(cache));
+          await widget.api.secureStorage
+              .write(clientCacheKey, jsonEncode(cache));
         }
       } catch (_) {
         // A falha de cache não impede a atualização online da carteira.
       }
     } on ApiException catch (exception) {
       if (!mounted) return;
+      // Conserva o valor anterior, mas a tela prioriza esta mensagem e oculta o gráfico (achado 178).
       setState(() => investmentMonthlyPerformanceError = exception.message);
     }
   }
 
+  /// Armazena os dados do cliente para restaurar a tela quando a API falhar.
   Future<void> _saveClientCache(Map<String, dynamic> currentUser,
       List<dynamic> results, Map<String, dynamic>? currentSuitability) async {
     try {
@@ -870,7 +1410,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<bool> _restoreClientCache() async {
+  /// Restaura dados de interface previamente armazenados no dispositivo.
+  Future<bool> _restoreClientCache({int? expectedUserId}) async {
     try {
       final raw = await widget.api.secureStorage.read(clientCacheKey);
       if (raw == null) return false;
@@ -878,15 +1419,21 @@ class _HomeScreenState extends State<HomeScreen> {
       final cachedUser = Map<String, dynamic>.from(payload['user'] as Map);
       final cachedDashboard =
           Map<String, dynamic>.from(payload['dashboard'] as Map);
-      if (cachedUser['role'] != 'client') return false;
+      final cachedUserId = cachedUser['id'];
+      // Dados de outro papel ou de outra conta nunca substituem a tela autenticada atual.
+      if (cachedUser['role'] != 'client' ||
+          cachedUserId is! int ||
+          (expectedUserId != null && cachedUserId != expectedUserId)) {
+        return false;
+      }
       if (!mounted) return false;
       setState(() {
         user = cachedUser;
         dashboard = cachedDashboard;
         investmentPortfolio = Map<String, dynamic>.from(
             payload['investment_portfolio'] as Map? ?? {});
-        investmentTransactions =
-            List<dynamic>.from(payload['investment_transactions'] as List? ?? []);
+        investmentTransactions = List<dynamic>.from(
+            payload['investment_transactions'] as List? ?? []);
         investmentMonthlyPerformance =
             payload['investment_monthly_performance'] == null
                 ? null
@@ -917,21 +1464,28 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       return true;
     } catch (_) {
+      // Cache inválido ou inacessível não substitui o erro original do carregamento.
       return false;
     }
   }
 
   // Formatações e rótulos abaixo isolam regras de apresentação dos widgets.
+  /// Formata valores monetários para exibição na tela.
   String money(dynamic value) => 'R\$ ${formatBrazilianNumber(value)}';
 
+  /// Formata o preço de referência de um alerta de mercado.
   String alertPrice(Map<String, dynamic> alert) {
+    // O preço-alvo não consulta hideValues e permanece visível com a preferência ativa.
     final value = formatBrazilianNumber(alert['target_price']);
+    // A API só entrega o mercado; alertas globais são assumidos como USD na tela.
     return alert['market'] == 'global' ? 'US\$ $value' : 'R\$ $value';
   }
 
+  /// Traduz a condição de disparo do alerta para um texto amigável.
   String marketAlertConditionLabel(dynamic value) =>
       value == 'at_or_above' ? 'Atingir ou superar' : 'Atingir ou ficar abaixo';
 
+  /// Traduz o estado do alerta para a interface.
   String marketAlertStatusLabel(dynamic value) => switch (value.toString()) {
         'active' => 'Ativo',
         'paused' => 'Pausado',
@@ -940,6 +1494,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _ => 'Desconhecido',
       };
 
+  /// Formata uma data sem horário para apresentação ao usuário.
   String dateLabel(dynamic value) {
     final date = DateTime.tryParse(value?.toString() ?? '');
     if (date == null) return value?.toString() ?? '';
@@ -948,6 +1503,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$day/$month/${date.year}';
   }
 
+  /// Formata data e horário para apresentação ao usuário.
   String dateTimeLabel(dynamic value) {
     final date = DateTime.tryParse(value?.toString() ?? '');
     if (date == null) return value?.toString() ?? '';
@@ -958,15 +1514,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$day/$month/${date.year} às $hour:$minute';
   }
 
+  /// Exibe uma mensagem de validação ou falha no formulário atual.
   void showFormError(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// Oculta ou formata um valor conforme a preferência de privacidade.
   String privateMoney(dynamic value) =>
       hideValues ? 'R\$ ••••••' : money(value);
 
+  /// Converte bytes em uma unidade legível para identificar o tamanho do arquivo.
   String fileSizeLabel(dynamic value) {
     final bytes = int.tryParse(value?.toString() ?? '') ?? 0;
     if (bytes < 1024) return '$bytes B';
@@ -974,30 +1533,35 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
+  /// Traduz o estado da meta para um rótulo em português.
   String goalStatusLabel(dynamic value) => switch (value.toString()) {
         'paused' => 'Pausada',
         'completed' => 'Concluída',
         _ => 'Ativa',
       };
 
+  /// Traduz o estado de uma ação para um rótulo em português.
   String actionStatusLabel(dynamic value) => switch (value.toString()) {
         'in_progress' => 'Em andamento',
         'completed' => 'Concluída',
         _ => 'Planejada',
       };
 
+  /// Traduz a prioridade de uma ação para um rótulo em português.
   String actionPriorityLabel(dynamic value) => switch (value.toString()) {
         'high' => 'Prioridade alta',
         'low' => 'Prioridade baixa',
         _ => 'Prioridade média',
       };
 
+  /// Escolhe uma cor visual conforme a prioridade da ação.
   Color actionPriorityColor(dynamic value) => switch (value.toString()) {
-        'high' => Colors.deepOrange,
-        'low' => Colors.teal,
-        _ => Colors.amber.shade800,
+        'high' => TalentumColors.error,
+        'low' => TalentumColors.teal,
+        _ => TalentumColors.gold,
       };
 
+  /// Encontra o nome da meta vinculada a uma ação do plano.
   String? goalTitleForAction(dynamic goalId) {
     if (goalId == null) return null;
     for (final goal in goals) {
@@ -1006,6 +1570,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
+  /// Verifica se uma ação não concluída já passou da data limite.
   bool isOverdueAction(Map<String, dynamic> action) {
     final dueDate = DateTime.tryParse(action['due_date']?.toString() ?? '');
     if (dueDate == null || action['status'] == 'completed') return false;
@@ -1015,6 +1580,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // A ordenação mantém pendências e vencimentos mais importantes no topo.
+  /// Ordena ações por atraso, conclusão, prioridade, prazo e título.
   List<dynamic> orderedActionPlan() {
     final actions = List<dynamic>.from(actionPlan);
     const priorityOrder = {'high': 0, 'medium': 1, 'low': 2};
@@ -1049,6 +1615,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return actions;
   }
 
+  /// Verifica se uma meta não concluída passou da data definida.
   bool isOverdueGoal(Map<String, dynamic> goal) {
     final targetDate = DateTime.tryParse(goal['target_date']?.toString() ?? '');
     if (targetDate == null || goal['status'] == 'completed') return false;
@@ -1057,6 +1624,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return endOfTargetDay.isBefore(DateTime.now());
   }
 
+  /// Ordena metas por atraso, conclusão, prazo e título.
   List<dynamic> orderedGoals(Iterable<dynamic> source) {
     final items = source.toList();
     items.sort((leftValue, rightValue) {
@@ -1085,6 +1653,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return items;
   }
 
+  /// Seleciona o ícone que representa o estado atual de uma ação.
   IconData actionStatusIcon(dynamic value) => switch (value.toString()) {
         'in_progress' => Icons.timelapse_outlined,
         'completed' => Icons.check_circle_outline,
@@ -1092,12 +1661,15 @@ class _HomeScreenState extends State<HomeScreen> {
       };
 
   // Alterna a ocultação de valores sensíveis apenas na interface local.
+  /// Alterna a exibição de valores financeiros privados.
   Future<void> toggleValueVisibility() async {
     setState(() => hideValues = !hideValues);
+    // A preferência visual muda antes da gravação; uma falha local escapa sem reverter o estado.
     await widget.api.preferences.setBool(hideValuesKey, hideValues);
   }
 
   // Constrói a navegação principal e escolhe a aba atualmente selecionada.
+  /// Monta a navegação do cliente, o menu lateral e o conteúdo da área ativa.
   @override
   Widget build(BuildContext context) {
     final labels = [
@@ -1109,10 +1681,13 @@ class _HomeScreenState extends State<HomeScreen> {
       'Relatórios',
       'Perfil'
     ];
+    // Relaciona cada destino visível na barra inferior ao índice lógico da tela.
+    const bottomSections = [0, 1, 5, 6];
+    final bottomIndex = bottomSections.indexOf(tab);
     return Scaffold(
+      drawer: _buildNavigationDrawer(),
       appBar: AppBar(
-        title: Image.asset('assets/brand/talentum-web-logo.png',
-            width: 136, height: 33),
+        title: const _TalentumBrandLockup(markSize: 34, fontSize: 20),
         actions: [
           IconButton(
             tooltip: hideValues ? 'Exibir valores' : 'Ocultar valores',
@@ -1167,44 +1742,197 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 18),
                     _content()
                   ])),
-      bottomNavigationBar: NavigationBar(
-          selectedIndex: tab,
-          labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-          onDestinationSelected: (value) => setState(() => tab = value),
-          destinations: const [
-            NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home),
-                label: 'Início'),
-            NavigationDestination(
-                icon: Icon(Icons.show_chart),
-                selectedIcon: Icon(Icons.show_chart),
-                label: 'Carteira'),
-            NavigationDestination(
-                icon: Icon(Icons.pie_chart_outline),
-                selectedIcon: Icon(Icons.pie_chart),
-                label: 'Patrimônio'),
-            NavigationDestination(
-                icon: Icon(Icons.flag_outlined),
-                selectedIcon: Icon(Icons.flag),
-                label: 'Metas'),
-            NavigationDestination(
-                icon: Icon(Icons.folder_outlined),
-                selectedIcon: Icon(Icons.folder),
-                label: 'Documentos'),
-            NavigationDestination(
-                icon: Icon(Icons.description_outlined),
-                selectedIcon: Icon(Icons.description),
-                label: 'Relatórios'),
-            NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'Perfil')
-          ]),
+      bottomNavigationBar: bottomIndex < 0
+          ? null
+          : NavigationBar(
+              selectedIndex: bottomIndex,
+              labelBehavior:
+                  NavigationDestinationLabelBehavior.onlyShowSelected,
+              onDestinationSelected: (value) =>
+                  setState(() => tab = bottomSections[value]),
+              destinations: const [
+                  NavigationDestination(
+                      icon: Icon(Icons.home_outlined),
+                      selectedIcon: Icon(Icons.home),
+                      label: 'Início'),
+                  NavigationDestination(
+                      icon: Icon(Icons.show_chart),
+                      selectedIcon: Icon(Icons.show_chart),
+                      label: 'Carteira'),
+                  NavigationDestination(
+                      icon: Icon(Icons.description_outlined),
+                      selectedIcon: Icon(Icons.description),
+                      label: 'Relatórios'),
+                  NavigationDestination(
+                      icon: Icon(Icons.person_outline),
+                      selectedIcon: Icon(Icons.person),
+                      label: 'Perfil')
+                ]),
+    );
+  }
+
+  /// Constrói o menu lateral com navegação e atalhos do cliente.
+  Widget _buildNavigationDrawer() {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              height: 100,
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              color: TalentumColors.petrol,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Image.asset(
+                        'assets/brand/talentum-moeda-prata.png',
+                        width: 34,
+                        height: 34,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'talentum',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      user?['name']?.toString() ?? 'Área do cliente',
+                      textAlign: TextAlign.left,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _drawerGroupLabel('PRINCIPAL'),
+                  _drawerDestination(
+                      icon: Icons.home_outlined,
+                      label: 'Início',
+                      destination: 0),
+                  _drawerDestination(
+                      icon: Icons.show_chart,
+                      label: 'Carteira',
+                      destination: 1),
+                  _drawerDestination(
+                      icon: Icons.description_outlined,
+                      label: 'Relatórios',
+                      destination: 5),
+                  _drawerDestination(
+                      icon: Icons.person_outline,
+                      label: 'Perfil e segurança',
+                      destination: 6),
+                  _drawerGroupLabel('PLANEJAMENTO'),
+                  _drawerDestination(
+                      icon: Icons.pie_chart_outline,
+                      label: 'Patrimônio',
+                      destination: 2),
+                  _drawerDestination(
+                      icon: Icons.flag_outlined,
+                      label: 'Metas',
+                      destination: 3),
+                  _drawerDestination(
+                      icon: Icons.checklist_outlined,
+                      label: 'Plano de ação',
+                      onTap: () => unawaited(openActionPlan())),
+                  _drawerGroupLabel('DOCUMENTOS E INVESTIMENTOS'),
+                  _drawerDestination(
+                      icon: Icons.folder_outlined,
+                      label: 'Documentos',
+                      destination: 4),
+                  _drawerDestination(
+                      icon: Icons.auto_awesome_outlined,
+                      label: 'Carteira sugerida',
+                      onTap: () => unawaited(openSuitabilityQuestionnaire())),
+                  _drawerGroupLabel('ACOMPANHAMENTO'),
+                  _drawerDestination(
+                      icon: Icons.notifications_outlined,
+                      label: 'Central de alertas',
+                      onTap: () => unawaited(openNotificationHistory())),
+                  const Divider(height: 18),
+                  ListTile(
+                    leading: const Icon(Icons.logout),
+                    title: const Text('Sair da conta'),
+                    onTap: () {
+                      // Fecha o drawer imediatamente e inicia a saída sem aguardar a navegação.
+                      Navigator.of(context).pop();
+                      unawaited(signOut());
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Constrói o título visual de um grupo no menu lateral.
+  Widget _drawerGroupLabel(String label) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: TalentumColors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+      );
+
+  /// Constrói um item do menu que seleciona uma aba ou executa uma ação contextual.
+  Widget _drawerDestination({
+    required IconData icon,
+    required String label,
+    int? destination,
+    VoidCallback? onTap,
+  }) {
+    final selected = destination != null && tab == destination;
+    return ListTile(
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      minLeadingWidth: 32,
+      selected: selected,
+      leading: Icon(icon, size: 21),
+      title: Text(label),
+      onTap: () {
+        // Fecha o drawer antes de executar uma ação ou trocar a aba selecionada.
+        Navigator.of(context).pop();
+        if (onTap != null) {
+          onTap();
+        } else if (destination != null) {
+          setState(() => tab = destination);
+        }
+      },
     );
   }
 
   // Seleciona o conteúdo da aba sem duplicar a estrutura do scaffold principal.
+  /// Seleciona e constrói o conteúdo correspondente à área ativa.
   Widget _content() {
     if (tab == 1) return _investmentPortfolioView();
     if (tab == 2) return _patrimonyView();
@@ -1212,16 +1940,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (tab == 4) return _documentsView();
     if (tab == 5) return _reportsView();
     if (tab == 6) return _profileView();
+    // As abas secundárias são renderizadas acima; o restante usa o resumo do dashboard.
     final data = dashboard!;
     final categories =
         List<dynamic>.from(data['patrimony_by_category'] as List? ?? []);
+    // A API usa null quando não há perfil; este fallback transforma ausência em zero (achado 142).
     final monthlyIncome =
         double.tryParse(data['monthly_income']?.toString() ?? '') ?? 0;
     final monthlyExpenses =
         double.tryParse(data['monthly_expenses']?.toString() ?? '') ?? 0;
+    // O saldo exibido é uma estimativa simples, sem considerar movimentações futuras.
     final monthlyBalance = monthlyIncome - monthlyExpenses;
+    // A função ordena atrasos, pendências, prioridade e prazo antes do resumo.
     final orderedActions = orderedActionPlan();
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // A data indica que o conteúdo veio do cache local em vez de uma carga atual.
       if (cachedAt != null) ...[
         Card(
           color: Colors.amber.shade50,
@@ -1261,13 +1994,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     const Text('FLUXO MENSAL'),
                     const SizedBox(height: 12),
-                    _summaryRow(
-                        'Renda', privateMoney(monthlyIncome), Colors.green),
+                    _summaryRow('Renda', privateMoney(monthlyIncome),
+                        TalentumColors.teal),
                     _summaryRow('Despesas', privateMoney(monthlyExpenses),
                         Colors.orange),
                     const Divider(height: 22),
-                    _summaryRow('Saldo estimado', privateMoney(monthlyBalance),
-                        monthlyBalance >= 0 ? Colors.teal : Colors.red)
+                    _summaryRow(
+                        'Saldo estimado',
+                        privateMoney(monthlyBalance),
+                        monthlyBalance >= 0
+                            ? TalentumColors.teal
+                            : TalentumColors.error)
                   ]))),
       const SizedBox(height: 16),
       Card(
@@ -1281,7 +2018,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     _summaryRow(
                         'Ações pendentes',
                         '${data['action_pending'] ?? actionPlan.where((action) => action['status'] != 'completed').length}',
-                        Colors.indigo),
+                        TalentumColors.petrol),
                     _summaryRow('Ações atrasadas',
                         '${data['action_overdue'] ?? 0}', Colors.red)
                   ]))),
@@ -1297,6 +2034,7 @@ class _HomeScreenState extends State<HomeScreen> {
       const SizedBox(height: 16),
       const Text('Distribuição'),
       const SizedBox(height: 8),
+      // Percentuais e barras permanecem visíveis mesmo quando montantes estão ocultos.
       ...categories.map((item) => ListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(item['category'].toString()),
@@ -1324,7 +2062,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: TextStyle(
                               color:
                                   isOverdueGoal(Map<String, dynamic>.from(goal))
-                                      ? Colors.red
+                                      ? TalentumColors.error
                                       : null))
                   ]),
               trailing: Text('${goal['percentage']}%'))),
@@ -1333,11 +2071,12 @@ class _HomeScreenState extends State<HomeScreen> {
       const SizedBox(height: 8),
       if (actionPlan.isEmpty)
         const Text('Nenhuma ação definida pelo seu Advisor.'),
+      // O painel mostra só as três primeiras ações da lista já priorizada.
       ...orderedActions.take(3).map((action) => ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(actionStatusIcon(action['status']),
               color: isOverdueAction(Map<String, dynamic>.from(action))
-                  ? Colors.red
+                  ? TalentumColors.error
                   : actionPriorityColor(action['priority'])),
           title: Text(action['title'].toString()),
           subtitle: Text(
@@ -1355,7 +2094,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Cartão de notificações com filtros, leitura individual e leitura em massa.
+  /// Constrói o cartão com avisos recentes do usuário.
   Widget _notificationsCard() {
+    // O indicador conta somente a lista carregada, limitada a 50 pela API por padrão.
+    // O cartão mostra até três avisos não lidos que correspondem ao filtro atual.
     final unread = notifications
         .where((notification) =>
             notification['read_at'] == null &&
@@ -1374,7 +2116,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                   '${notifications.where((notification) => notification['read_at'] == null).length} não lidos',
                   style: const TextStyle(
-                      color: Colors.deepOrange, fontWeight: FontWeight.w700))
+                      color: TalentumColors.error, fontWeight: FontWeight.w700))
             ]),
             const SizedBox(height: 8),
             DropdownButton<String>(
@@ -1402,6 +2144,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     value: 'market_price_alert',
                     child: Text('Alertas de preço')),
               ],
+              // Aplica o filtro selecionado à lista carregada e atualiza a tela.
               onChanged: (value) =>
                   setState(() => notificationFilter = value ?? 'all'),
             ),
@@ -1413,6 +2156,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 title: Text(notification['title'].toString()),
                 subtitle: Text(
                     '${notification['message']} · ${dateTimeLabel(notification['created_at'])}'),
+                // Marca o aviso como lido e leva o cliente à área relacionada.
                 onTap: () => openNotification(notification))),
             Wrap(spacing: 8, children: [
               TextButton(
@@ -1429,6 +2173,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Lista de alertas de preço e ações para editar, pausar ou cancelar cada alerta.
+  /// Constrói a seção de alertas de preço ativos.
   Widget _marketAlertsCard() {
     return Card(
       child: Padding(
@@ -1448,6 +2193,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (marketAlerts.isEmpty)
               const Text(
                   'Crie um alerta para receber uma notificação quando um ativo atingir o preço escolhido.'),
+            // Mantém o resumo compacto; o histórico abre a lista completa quando houver mais de três.
             ...marketAlerts.take(3).map(
                 (alert) => _marketAlertTile(Map<String, dynamic>.from(alert))),
             if (marketAlerts.length > 3)
@@ -1461,6 +2207,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Resume a carteira sugerida à divisão e aos ativos de referência.
+  /// Apresenta a avaliação, recomendação e ações de suitability.
   Widget _suitabilityCard() {
     final assessment = suitability;
     if (assessment == null) {
@@ -1526,6 +2273,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: EdgeInsets.only(top: 8),
                 child: Text('A divisão sugerida ainda não está disponível.'),
               ),
+            // Cada categoria mostra seu peso e, quando disponíveis, subcategorias e ativos.
             ...allocations.map((item) {
               final allocation = Map<String, dynamic>.from(item as Map);
               final percentage =
@@ -1567,8 +2315,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       );
                     }),
+                    // Mostra à parte os ativos individuais que o Advisor selecionou para a proposta.
                     ...List<dynamic>.from(
-                            allocation['advisor_assets'] as List? ?? <dynamic>[])
+                            allocation['advisor_assets'] as List? ??
+                                <dynamic>[])
                         .map((item) {
                       final asset = Map<String, dynamic>.from(item as Map);
                       return Padding(
@@ -1583,6 +2333,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               );
             }),
+            // Só permite aceite quando a proposta do Advisor foi publicada e aprovada e aguarda resposta.
             if (recommendation['advisor_proposal_published_at'] != null &&
                 assessment['status'] == 'approved' &&
                 assessment['client_response'] == 'pending') ...[
@@ -1602,6 +2353,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Registra a confirmação do cliente para a carteira sugerida pelo assessor.
   Future<void> acceptAdvisorSuitability(Map<String, dynamic> assessment) async {
     final assessmentId = assessment['id'];
     if (assessmentId is! int) return;
@@ -1612,6 +2364,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (!mounted) return;
       setState(() => suitability = updated);
+      // Invalida o cache local depois de o aceite já ter sido confirmado pela API.
       await widget.api.secureStorage.delete(clientCacheKey);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1623,6 +2376,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre o questionário, coleta respostas e envia a avaliação.
   Future<void> openSuitabilityQuestionnaire() async {
     Map<String, dynamic> definition;
     try {
@@ -1653,8 +2407,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (!mounted) return;
     var objective = suitability?['objective']?.toString() ??
-        Map<String, dynamic>.from(objectives.first as Map)['value'].toString();
+        Map<String, dynamic>.from(objectives.first as Map)['value']
+            .toString(); // O objetivo salvo não é validado contra as opções atuais (achado 190).
     final answers = <String, String>{};
+    // Reaproveita as respostas anteriores sem filtrar chaves que possam ter saído do questionário (achado 188).
     final savedAnswers = suitability?['answers'];
     if (savedAnswers is Map) {
       savedAnswers.forEach((key, value) {
@@ -1666,6 +2422,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (dialogContext) {
         var submitting = false;
+        // Exige confirmação explícita do retrato financeiro atual antes de enviar as respostas.
         var financialConfirmed = false;
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
@@ -1776,6 +2533,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       final selected = optionValues.contains(answers[key])
                           ? answers[key]
                           : null;
+                      // Respostas múltiplas são salvas em ordem das opções; "none" exclui as demais.
                       if (question['selection_mode'] == 'multiple') {
                         return Card(
                           margin: const EdgeInsets.only(bottom: 14),
@@ -1908,6 +2666,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     submitting ? null : () => Navigator.pop(dialogContext),
                 child: const Text('Cancelar'),
               ),
+              // A habilitação compara quantidades; a API também valida se cada chave esperada está presente.
               FilledButton(
                 onPressed: submitting ||
                         !hasFinancialProfile ||
@@ -1941,7 +2700,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result == null || !mounted) return;
+    // Atualiza a avaliação; o risco no perfil financeiro local continua até uma nova carga.
     setState(() => suitability = result);
+    // Se a limpeza falhar, a avaliação já foi salva e o aviso de sucesso não será exibido (achado 119).
     await widget.api.secureStorage.delete(clientCacheKey);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1949,6 +2710,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Cancela um alerta de preço após a ação do usuário.
   Future<void> cancelMarketAlert(Map<String, dynamic> alert) async {
     try {
       await widget.api.cancelMarketAlert(alert['id'] as int);
@@ -1961,6 +2723,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Constrói a linha visual de um alerta e suas ações.
   Widget _marketAlertTile(Map<String, dynamic> alert, {VoidCallback? onEdit}) {
     final status = alert['status']?.toString();
     final editable = status != 'cancelled';
@@ -1970,7 +2733,8 @@ class _HomeScreenState extends State<HomeScreen> {
         status == 'triggered'
             ? Icons.notifications_active
             : Icons.trending_up_outlined,
-        color: status == 'triggered' ? Colors.deepOrange : Colors.indigo,
+        color:
+            status == 'triggered' ? TalentumColors.gold : TalentumColors.petrol,
       ),
       title: Text('${alert['symbol']} · ${alertPrice(alert)}'),
       subtitle: Text(
@@ -1990,6 +2754,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (status == 'active' || status == 'paused')
             IconButton(
               tooltip: 'Desativar alerta',
+              // O cancelamento é imediato e o alerta cancelado não pode ser reativado por esta tela (achado 211).
               onPressed: () => cancelMarketAlert(alert),
               icon: const Icon(Icons.close),
             ),
@@ -1998,6 +2763,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Abre a relação completa de alertas de mercado.
   Future<void> openMarketAlertsHistory() async {
     final selectedAlert = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -2033,6 +2799,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre o formulário para criar ou editar um alerta de preço.
   Future<void> openMarketAlertDialog({Map<String, dynamic>? alert}) async {
     final editing = alert != null;
     final symbol = TextEditingController(
@@ -2056,6 +2823,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 TextField(
                     controller: symbol,
+                    // O endpoint de edição aceita preço e condição; ticker e mercado ficam fixos.
                     readOnly: editing || saving,
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
@@ -2124,6 +2892,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return;
                       }
                       if (saving) return;
+                      // Define o bloqueio antes do primeiro await para evitar envios repetidos.
                       saving = true;
                       try {
                         setDialogState(() {});
@@ -2184,6 +2953,7 @@ class _HomeScreenState extends State<HomeScreen> {
     target.dispose();
   }
 
+  /// Abre o destino associado a uma notificação e marca a leitura.
   Future<void> openNotification(Map<String, dynamic> notification) async {
     try {
       await widget.api.markNotificationRead(notification['id'] as int);
@@ -2210,6 +2980,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Marca todas as notificações carregadas como lidas.
   Future<void> markAllNotificationsRead() async {
     try {
       await widget.api.markAllNotificationsRead();
@@ -2222,6 +2993,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre o formulário de preferências de notificações.
   Future<void> openNotificationPreferences() async {
     final values = <String, bool>{
       'action_overdue': notificationPreferences['action_overdue'] == true,
@@ -2252,6 +3024,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: labels.entries
+                  // Cada alternância edita o rascunho local até o usuário salvar o diálogo.
                   .map((entry) => SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(entry.value),
@@ -2268,6 +3041,8 @@ class _HomeScreenState extends State<HomeScreen> {
             FilledButton(
               onPressed: () async {
                 try {
+                  // Envia todas as opções; após o fallback, valores não editados também podem ser sobrescritos.
+                  // O diálogo e o botão seguem ativos durante o PATCH; envios podem confirmar fora de ordem (achado 159).
                   final updated =
                       await widget.api.updateNotificationPreferences(values);
                   if (!mounted || !dialogContext.mounted) return;
@@ -2290,6 +3065,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Abre o histórico de notificações com seus filtros.
   Future<void> openNotificationHistory() async {
     var selectedFilter = notificationFilter;
     await showDialog<void>(
@@ -2300,7 +3076,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .where((notification) =>
                   selectedFilter == 'all' ||
                   notification['kind'] == selectedFilter)
-              .toList();
+              .toList(); // O histórico filtra apenas os itens já carregados; a API limita essa lista a 50 (achado 140).
           return AlertDialog(
             title: const Text('Histórico de alertas'),
             content: SizedBox(
@@ -2351,12 +3127,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ? Icons.notifications_active_outlined
                                   : Icons.notifications_none_outlined,
                               color: notification['read_at'] == null
-                                  ? Colors.deepOrange
+                                  ? TalentumColors.error
                                   : null),
                           title: Text(notification['title'].toString()),
                           subtitle: Text(
                               '${notification['message']}\n${dateTimeLabel(notification['created_at'])}'),
                           onTap: () {
+                            // Fecha o histórico antes de marcar a notificação e abrir seu destino.
                             Navigator.pop(dialogContext);
                             openNotification(
                                 Map<String, dynamic>.from(notification));
@@ -2384,6 +3161,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => notificationFilter = selectedFilter);
   }
 
+  /// Exibe o plano de ações e permite consultar tarefas do cliente.
   Future<void> openActionPlan() async {
     final orderedActions = orderedActionPlan();
     await showModalBottomSheet<void>(
@@ -2413,6 +3191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemCount: orderedActions.length,
                     separatorBuilder: (_, __) => const Divider(),
                     itemBuilder: (_, index) {
+                      // Deriva o destaque de atraso e o conteúdo de cada ação ao montar a lista.
                       final action = orderedActions[index];
                       final overdue =
                           isOverdueAction(Map<String, dynamic>.from(action));
@@ -2420,7 +3199,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: Icon(actionStatusIcon(action['status']),
                             color: overdue
-                                ? Colors.red
+                                ? TalentumColors.error
                                 : actionPriorityColor(action['priority'])),
                         title: Text(action['title'].toString()),
                         subtitle: Padding(
@@ -2440,6 +3219,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Constrói uma linha de resumo com rótulo, valor e cor.
   Widget _summaryRow(String label, String value, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -2454,12 +3234,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Formata ou mascara valores monetários; cotas e percentuais são renderizados separadamente.
   String investmentMoney(dynamic value, dynamic currency) {
     if (hideValues) return '••••••';
+    // O formatador atual distingue USD e usa BRL como fallback para outras moedas.
     final prefix = currency?.toString() == 'USD' ? 'US\$' : 'R\$';
     return '$prefix ${formatBrazilianNumber(value)}';
   }
 
+  /// Agrupa posições por moeda para não comparar valores sem conversão cambial.
   Map<String, List<dynamic>> _positionsByCurrency(List<dynamic> positions) {
     final grouped = <String, List<dynamic>>{};
     for (final item in positions) {
@@ -2470,14 +3253,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return grouped;
   }
 
+  /// Constrói o gráfico circular com pesos percentuais visíveis mesmo com hideValues ativo.
   Widget _assetAllocationDonut(String currency, List<dynamic> positions) {
-    final priced = positions.where((item) =>
-        (double.tryParse(item['allocation_percent']?.toString() ?? '') ?? 0) > 0).toList();
+    // Exclui posições sem peso positivo para não criar segmentos vazios no gráfico.
+    final priced = positions
+        .where((item) =>
+            (double.tryParse(item['allocation_percent']?.toString() ?? '') ??
+                0) >
+            0)
+        .toList();
     if (priced.isEmpty) return const SizedBox.shrink();
     final values = priced
-        .map((item) => double.tryParse(
-                item['allocation_percent']?.toString() ?? '') ??
-            0)
+        .map((item) =>
+            double.tryParse(item['allocation_percent']?.toString() ?? '') ?? 0)
         .toList();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2509,7 +3297,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: Column(
               children: List.generate(priced.length, (index) {
-                final position = Map<String, dynamic>.from(priced[index] as Map);
+                final position =
+                    Map<String, dynamic>.from(priced[index] as Map);
                 final pct = values[index];
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2544,9 +3333,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Constrói o gráfico e os indicadores de desempenho mensal.
   Widget _monthlyInvestmentPerformance() {
     final performance = investmentMonthlyPerformance;
-    final currencies = List<dynamic>.from(performance?['currencies'] as List? ?? []);
+    // A API retorna séries separadas por moeda; não há conversão cambial para consolidá-las aqui.
+    // Os percentuais de retorno/CDI e as linhas do gráfico não consultam hideValues.
+    final currencies =
+        List<dynamic>.from(performance?['currencies'] as List? ?? []);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2567,16 +3360,20 @@ class _HomeScreenState extends State<HomeScreen> {
         else if (currencies.isEmpty)
           const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: Text('O histórico aparecerá após a primeira atualização da carteira.'),
+            child: Text(
+                'O histórico aparecerá após a primeira atualização da carteira.'),
           )
         else ...[
           ...currencies.map((raw) {
             final item = Map<String, dynamic>.from(raw as Map);
             final currency = item['currency']?.toString() ?? 'BRL';
+            // Dados parciais podem mostrar totais e cobertura, mas não um retorno calculado.
             final hasData = item['data_available'] == true;
             final points = List<dynamic>.from(item['points'] as List? ?? []);
+            // A comparação com CDI só é válida para a série denominada em reais.
             final cdi = currency == 'BRL' ? item['cdi_percent'] : null;
-            final monthParts = (performance['month']?.toString() ?? '').split('-');
+            final monthParts =
+                (performance['month']?.toString() ?? '').split('-');
             final month = monthParts.length == 2
                 ? '${monthParts[1]}/${monthParts[0]}'
                 : monthParts.first;
@@ -2593,40 +3390,71 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: const TextStyle(fontWeight: FontWeight.w700)),
                       if (item['source_status'] == 'partial')
                         const Text('Dados parciais',
-                            style: TextStyle(color: Colors.deepOrange)),
+                            style:
+                                const TextStyle(color: TalentumColors.error)),
                     ],
                   ),
                   if (item['full_month_to_date'] == false && start != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text('Histórico disponível desde ${formatApiDate(start)}.',
+                      child: Text(
+                          'Histórico disponível desde ${formatApiDate(start)}.',
                           style: Theme.of(context).textTheme.bodySmall),
                     ),
                   const SizedBox(height: 6),
-                  _summaryRow('Valor investido',
-                      investmentMoney(item['invested_value'], currency), Colors.blueGrey),
-                  _summaryRow('Rendimento em valor',
-                      hasData ? '${(double.tryParse(item['profit_value']?.toString() ?? '') ?? 0) >= 0 ? '+' : ''}${investmentMoney(item['profit_value'], currency)}' : '—',
-                      (double.tryParse(item['profit_value']?.toString() ?? '') ?? 0) >= 0 ? Colors.green : Colors.red),
-                  _summaryRow('Rendimento',
-                      hasData ? '${formatBrazilianNumber(item['return_percent'], fractionDigits: 2)}%' : '—', Colors.deepPurple),
+                  _summaryRow(
+                      'Valor investido',
+                      investmentMoney(item['invested_value'], currency),
+                      TalentumColors.muted),
+                  _summaryRow(
+                      'Rendimento em valor',
+                      hasData
+                          ? '${(double.tryParse(item['profit_value']?.toString() ?? '') ?? 0) >= 0 ? '+' : ''}${investmentMoney(item['profit_value'], currency)}'
+                          : '—',
+                      (double.tryParse(
+                                      item['profit_value']?.toString() ?? '') ??
+                                  0) >=
+                              0
+                          ? TalentumColors.teal
+                          : TalentumColors.error),
+                  _summaryRow(
+                      'Rendimento',
+                      hasData
+                          ? '${formatBrazilianNumber(item['return_percent'], fractionDigits: 2)}%'
+                          : '—',
+                      TalentumColors.petrol),
                   if (currency == 'BRL') ...[
-                    _summaryRow('CDI no mês',
-                        cdi == null ? 'Indisponível' : '${formatBrazilianNumber(cdi, fractionDigits: 2)}%', Colors.blueGrey),
-                    _summaryRow('Acima do CDI',
-                        item['excess_percentage_points'] == null ? '—' : '${(double.tryParse(item['excess_percentage_points'].toString()) ?? 0) >= 0 ? '+' : ''}${formatBrazilianNumber(item['excess_percentage_points'], fractionDigits: 2)} p.p.', Colors.teal),
-                    _summaryRow('Equivalente',
-                        item['percent_of_cdi'] == null ? '—' : '${formatBrazilianNumber(item['percent_of_cdi'], fractionDigits: 1)}% do CDI', Colors.teal),
+                    _summaryRow(
+                        'CDI no mês',
+                        cdi == null
+                            ? 'Indisponível'
+                            : '${formatBrazilianNumber(cdi, fractionDigits: 2)}%',
+                        TalentumColors.muted),
+                    // As duas métricas podem indicar desempenho abaixo do CDI, mas recebem sempre a cor teal (achado 187).
+                    _summaryRow(
+                        'Acima do CDI',
+                        item['excess_percentage_points'] == null
+                            ? '—'
+                            : '${(double.tryParse(item['excess_percentage_points'].toString()) ?? 0) >= 0 ? '+' : ''}${formatBrazilianNumber(item['excess_percentage_points'], fractionDigits: 2)} p.p.',
+                        TalentumColors.teal),
+                    _summaryRow(
+                        'Equivalente',
+                        item['percent_of_cdi'] == null
+                            ? '—'
+                            : '${formatBrazilianNumber(item['percent_of_cdi'], fractionDigits: 1)}% do CDI',
+                        TalentumColors.teal),
                   ],
                   if (!hasData)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
-                      child: Text('Precisamos de duas atualizações completas para calcular o rendimento.',
+                      child: Text(
+                          'Precisamos de duas atualizações completas para calcular o rendimento.',
                           style: Theme.of(context).textTheme.bodySmall),
                     )
                   else
                     MonthlyInvestmentLineChart(
-                        points: points, showCdi: currency == 'BRL' && cdi != null),
+                        points: points,
+                        showCdi: currency == 'BRL' && cdi != null),
                 ],
               ),
             );
@@ -2642,8 +3470,7 @@ class _HomeScreenState extends State<HomeScreen> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
-          if (currencies.any((item) =>
-              (item as Map)['data_available'] == true))
+          if (currencies.any((item) => (item as Map)['data_available'] == true))
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
@@ -2656,7 +3483,324 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Constrói a lista filtrável do histórico de operações.
+  Widget _investmentTransactionsHistory() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 24),
+        const Text('Histórico de operações',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        // Alterar filtros só muda os parâmetros da próxima consulta, não a lista já carregada.
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: investmentTransactionPeriod,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Período',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                      value: 'all', child: Text('Todo o histórico')),
+                  DropdownMenuItem(
+                      value: '30d', child: Text('Últimos 30 dias')),
+                  DropdownMenuItem(
+                      value: '90d', child: Text('Últimos 90 dias')),
+                  DropdownMenuItem(value: 'ytd', child: Text('Este ano')),
+                ],
+                onChanged: investmentTransactionsBusy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() => investmentTransactionPeriod = value);
+                        }
+                      },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: investmentTransactionType,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Tipo',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'all', child: Text('Todas')),
+                  DropdownMenuItem(value: 'buy', child: Text('Compras')),
+                  DropdownMenuItem(value: 'sell', child: Text('Vendas')),
+                ],
+                onChanged: investmentTransactionsBusy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() => investmentTransactionType = value);
+                        }
+                      },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: investmentTransactionSymbolController,
+          enabled: !investmentTransactionsBusy,
+          textCapitalization: TextCapitalization.characters,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => refreshInvestmentTransactions(),
+          decoration: const InputDecoration(
+            labelText: 'Ativo',
+            hintText: 'Ex.: PETR4 ou AAPL',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : refreshInvestmentTransactions,
+              icon: const Icon(Icons.filter_alt_outlined),
+              label: const Text('Aplicar filtros'),
+            ),
+            TextButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : clearInvestmentTransactionFilters,
+              icon: const Icon(Icons.clear),
+              label: const Text('Limpar'),
+            ),
+          ],
+        ),
+        if (investmentTransactionsBusy)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: LinearProgressIndicator(),
+          ),
+        if (investmentTransactionsError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(investmentTransactionsError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12, bottom: 4),
+          child: Text('${investmentTransactions.length} operação(ões)'),
+        ),
+        if (investmentTransactions.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Nenhuma operação corresponde aos filtros.'),
+          )
+        else
+          ...investmentTransactions.map((raw) {
+            final operation = Map<String, dynamic>.from(raw as Map);
+            final isBuy = operation['operation_type'] == 'buy';
+            final isVoided = operation['voided_at'] != null;
+            final currency = operation['currency'];
+            // investmentMoney mascara montantes, mas a quantidade de cotas continua visível (achado 98).
+            final realized = isVoided ? null : operation['realized_pnl'];
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              onTap: () => showInvestmentTransactionDetails(operation),
+              leading: Icon(
+                isBuy ? Icons.south_west : Icons.north_east,
+                color: isVoided
+                    ? TalentumColors.silver
+                    : isBuy
+                        ? TalentumColors.petrol
+                        : TalentumColors.teal,
+              ),
+              title: Text(
+                  '${isBuy ? 'Compra' : 'Venda'}${isVoided ? ' anulada' : ''} · ${operation['symbol']} · ${dateLabel(operation['operation_date'])}'),
+              subtitle: Text(
+                isVoided
+                    ? 'Toque para ver os detalhes da anulação.'
+                    : '${formatInvestmentQuantity(operation['quantity'])} cotas × ${investmentMoney(operation['unit_price'], currency)} · taxas ${investmentMoney(operation['fees'], currency)}'
+                        '${realized == null ? '' : '\nResultado realizado: ${investmentMoney(realized, currency)}'}',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    isVoided
+                        ? 'Anulada'
+                        : investmentMoney(operation['net_value'], currency),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.chevron_right, size: 18),
+                ],
+              ),
+            );
+          }),
+        if (investmentTransactionsHasMore)
+          Align(
+            alignment: Alignment.center,
+            child: TextButton.icon(
+              onPressed: investmentTransactionsBusy
+                  ? null
+                  : loadMoreInvestmentTransactions,
+              icon: const Icon(Icons.expand_more),
+              label: const Text('Carregar mais operações'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Constrói uma linha de campo no detalhe de uma operação.
+  Widget _investmentTransactionDetailRow(String label, String value,
+      {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style:
+                    TextStyle(fontWeight: FontWeight.w600, color: valueColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Apresenta todos os dados disponíveis de uma operação selecionada.
+  Future<void> showInvestmentTransactionDetails(
+      Map<String, dynamic> operation) async {
+    final isBuy = operation['operation_type'] == 'buy';
+    final isVoided = operation['voided_at'] != null;
+    final currency = operation['currency'];
+    final realized =
+        double.tryParse(operation['realized_pnl']?.toString() ?? '');
+    final name = operation['name']?.toString().trim();
+    // A preferência oculta valores monetários abaixo, mas não mascara as quantidades de cotas (achado 98).
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Theme.of(sheetContext).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                '${isBuy ? 'Compra' : 'Venda'} · ${operation['symbol']}',
+                style: Theme.of(sheetContext).textTheme.titleLarge,
+              ),
+              if (name != null && name.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(name,
+                      style: Theme.of(sheetContext).textTheme.bodyMedium),
+                ),
+              if (isVoided)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Chip(
+                    avatar: Icon(Icons.cancel_outlined, size: 18),
+                    label: Text('Operação anulada'),
+                  ),
+                ),
+              const Divider(height: 24),
+              _investmentTransactionDetailRow(
+                  'Data', dateLabel(operation['operation_date'])),
+              _investmentTransactionDetailRow('Mercado',
+                  operation['market'] == 'global' ? 'Global' : 'Brasil'),
+              _investmentTransactionDetailRow('Quantidade',
+                  '${formatInvestmentQuantity(operation['quantity'])} cotas'),
+              _investmentTransactionDetailRow('Preço por cota',
+                  investmentMoney(operation['unit_price'], currency)),
+              _investmentTransactionDetailRow('Valor bruto',
+                  investmentMoney(operation['gross_value'], currency)),
+              _investmentTransactionDetailRow(
+                  'Taxas', investmentMoney(operation['fees'], currency)),
+              _investmentTransactionDetailRow('Valor líquido',
+                  investmentMoney(operation['net_value'], currency)),
+              const Divider(height: 20),
+              Text('Impacto na carteira',
+                  style: Theme.of(sheetContext)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              _investmentTransactionDetailRow('Cotas antes',
+                  formatInvestmentQuantity(operation['quantity_before'])),
+              _investmentTransactionDetailRow('Cotas depois',
+                  formatInvestmentQuantity(operation['quantity_after'])),
+              _investmentTransactionDetailRow(
+                  'Preço médio antes',
+                  operation['average_price_before'] == null
+                      ? '—'
+                      : investmentMoney(
+                          operation['average_price_before'], currency)),
+              _investmentTransactionDetailRow(
+                  'Preço médio depois',
+                  operation['average_price_after'] == null
+                      ? '—'
+                      : investmentMoney(
+                          operation['average_price_after'], currency)),
+              if (!isBuy && !isVoided && operation['realized_pnl'] != null)
+                _investmentTransactionDetailRow(
+                  'Resultado realizado',
+                  '${realized != null && realized >= 0 ? '+' : ''}${investmentMoney(operation['realized_pnl'], currency)}',
+                  valueColor: realized == null
+                      ? null
+                      : realized >= 0
+                          ? TalentumColors.teal
+                          : TalentumColors.error,
+                ),
+              if (operation['institution']?.toString().trim().isNotEmpty ==
+                  true)
+                _investmentTransactionDetailRow(
+                    'Instituição', operation['institution'].toString()),
+              if (operation['notes']?.toString().trim().isNotEmpty == true)
+                _investmentTransactionDetailRow(
+                    'Observações', operation['notes'].toString()),
+              if (isVoided && operation['void_reason'] != null)
+                _investmentTransactionDetailRow(
+                    'Motivo da anulação', operation['void_reason'].toString()),
+              if (isVoided && operation['voided_at'] != null)
+                _investmentTransactionDetailRow(
+                    'Anulada em', dateTimeLabel(operation['voided_at'])),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // Exibe a carteira consolidada por posição, moeda e resultado.
+  /// Constrói a visão de posições e distribuição da carteira.
   Widget _investmentPortfolioView() {
     final portfolio = investmentPortfolio ?? <String, dynamic>{};
     final positions = List<dynamic>.from(portfolio['positions'] as List? ?? []);
@@ -2681,20 +3825,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? 'Ver por moeda'
                     : investmentMoney(portfolio['invested_total'],
                         portfolio['total_currency']),
-                Colors.blueGrey),
+                TalentumColors.muted),
             _summaryRow(
                 'Valor atualizado',
                 portfolio['mixed_currency'] == true
                     ? 'Ver por moeda'
                     : investmentMoney(portfolio['current_total'],
                         portfolio['total_currency']),
-                Colors.teal),
+                TalentumColors.teal),
             _summaryRow(
                 'Resultado',
                 portfolio['mixed_currency'] == true
                     ? 'Ver por moeda'
                     : '${pnl >= 0 ? '+' : ''}${investmentMoney(portfolio['pnl_total'], portfolio['total_currency'])}',
-                pnl >= 0 ? Colors.green : Colors.red),
+                pnl >= 0 ? TalentumColors.teal : TalentumColors.error),
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: investmentReportBusy ? null : emitInvestmentReport,
@@ -2719,12 +3863,13 @@ class _HomeScreenState extends State<HomeScreen> {
               const Divider(height: 24),
               const Text('Distribuição por ativo',
                   style: TextStyle(fontWeight: FontWeight.w700)),
-              ..._positionsByCurrency(positions).entries.map((entry) =>
-                  _assetAllocationDonut(entry.key, entry.value)),
+              ..._positionsByCurrency(positions).entries.map(
+                  (entry) => _assetAllocationDonut(entry.key, entry.value)),
               if (_positionsByCurrency(positions).length > 1)
                 const Text(
                   'As moedas são apresentadas separadamente, sem conversão cambial.',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                  style: const TextStyle(
+                      fontSize: 12, color: TalentumColors.muted),
                 ),
             ],
             _monthlyInvestmentPerformance(),
@@ -2742,7 +3887,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               0) /
                           100),
                   trailing: Text(
-                      '${double.tryParse(item['percentage']?.toString() ?? '')?.toStringAsFixed(1) ?? '0,0'}%'))),
+                      '${double.tryParse(item['percentage']?.toString() ?? '')?.toStringAsFixed(1) ?? '0,0'}%'))), // toStringAsFixed usa ponto, ao contrário do formato pt-BR (achado 157).
             ],
             if ((portfolio['currency_totals'] as List? ?? []).isNotEmpty) ...[
               const Divider(height: 24),
@@ -2756,7 +3901,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       subtitle: Text(
                           'Investido: ${investmentMoney(item['invested_total'], item['currency'])} · Atualizado: ${investmentMoney(item['current_total'], item['currency'])}'),
                       trailing: Text(
-                          '${double.tryParse(item['pnl_percent']?.toString() ?? '')?.toStringAsFixed(1) ?? '—'}%'))),
+                          '${double.tryParse(item['pnl_percent']?.toString() ?? '')?.toStringAsFixed(1) ?? '—'}%'))), // Percentual sem localização pt-BR (achado 157).
             ],
             if (positions.isNotEmpty) ...[
               const Divider(height: 24),
@@ -2772,39 +3917,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       : investmentMoney(
                           item['current_value'], item['currency'])))),
             ],
-            if (investmentTransactions.isNotEmpty) ...[
-              const Divider(height: 24),
-              const Text('Histórico de operações',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
-              ...investmentTransactions.map((raw) {
-                final operation = Map<String, dynamic>.from(raw as Map);
-                final isBuy = operation['operation_type'] == 'buy';
-                final isVoided = operation['voided_at'] != null;
-                final currency = operation['currency'];
-                final date = dateLabel(operation['operation_date']);
-                final realized = isVoided ? null : operation['realized_pnl'];
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(isBuy ? Icons.south_west : Icons.north_east,
-                      color: isBuy ? Colors.blue : Colors.deepOrange),
-                  title: Text('${isBuy ? 'Compra' : 'Venda'}${isVoided ? ' anulada' : ''} · ${operation['symbol']} · $date'),
-                  subtitle: Text(
-                    isVoided
-                        ? 'Motivo: ${operation['void_reason'] ?? 'não informado'}'
-                        : '${formatInvestmentQuantity(operation['quantity'])} cotas × ${investmentMoney(operation['unit_price'], currency)} · taxas ${investmentMoney(operation['fees'], currency)}'
-                            '${realized == null ? '' : '\nResultado realizado: ${investmentMoney(realized, currency)}'}',
-                  ),
-                  trailing: Text(
-                    isVoided
-                        ? 'Anulada'
-                        : hideValues
-                        ? '••••••'
-                        : investmentMoney(operation['net_value'], currency),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                );
-              }),
-            ],
+            _investmentTransactionsHistory(),
             if (positions.isEmpty)
               const Padding(
                   padding: EdgeInsets.only(top: 10),
@@ -2816,6 +3929,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Patrimônio, metas e plano de ação são módulos independentes da carteira.
+  /// Constrói a área de consulta e edição de patrimônio.
   Widget _patrimonyView() {
     final canEdit = permissions?['can_edit_patrimony'] == true;
     return Column(
@@ -2862,8 +3976,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Constrói a área de metas financeiras e seu progresso.
   Widget _goalsView() {
     final canEdit = permissions?['can_edit_goals'] == true;
+    // O filtro de atraso inclui toda meta não concluída, inclusive pausadas (achado 54).
     final visibleGoals = orderedGoals(goalFilter == 'all'
         ? goals
         : goals.where((goal) => goalFilter == 'overdue'
@@ -2904,6 +4020,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 double.tryParse(goal['target_value']?.toString() ?? '') ?? 0;
             final current =
                 double.tryParse(goal['current_value']?.toString() ?? '') ?? 0;
+            // Mantém a barra entre 0% e 100%, mesmo quando o valor atual supera a meta.
             final progress = target <= 0
                 ? 0.0
                 : (current / target).clamp(0.0, 1.0).toDouble();
@@ -2915,7 +4032,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     const SizedBox(height: 8),
                     LinearProgressIndicator(
-                        value: progress, color: overdue ? Colors.red : null),
+                        value: progress,
+                        color: overdue ? TalentumColors.error : null),
                     const SizedBox(height: 6),
                     Text(
                       '${privateMoney(goal['current_value'])} de ${privateMoney(goal['target_value'])}${goal['target_date'] != null ? ' · até ${dateLabel(goal['target_date'])}' : ''}${overdue ? ' · Prazo vencido' : ''}',
@@ -2943,6 +4061,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Relatórios são somente leitura no mobile; a publicação ocorre no painel Advisor.
+  /// Constrói a lista de relatórios disponíveis ao cliente.
   Widget _reportsView() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2966,7 +4085,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Documentos exibem o estado de revisão e permitem visualizar/baixar o arquivo.
+  /// Constrói a área de consulta e envio de documentos.
   Widget _documentsView() {
+    // A permissão controla apenas o botão; clientes continuam sem autorização de upload na rota (achado 49).
     final canUpload = user?['role'] != 'client' &&
         permissions?['can_upload_documents'] == true;
     return Column(
@@ -3004,7 +4125,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Seleciona o arquivo, coleta seus metadados e envia o documento ao cliente.
   Future<void> uploadDocument() async {
+    // O seletor fica fora do try abaixo, que captura apenas falhas da API (achado 41).
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg', 'txt'],
@@ -3014,6 +4137,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     final file = result.files.single;
+    // Evita iniciar um envio acima do limite, que também é aplicado durante a leitura na API.
     if (file.size > 10 * 1024 * 1024) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -3023,6 +4147,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final path = file.path!;
     final extension = (file.extension ?? '').toLowerCase();
+    // Define o MIME enviado no multipart a partir da extensão permitida pelo seletor.
     final contentType = switch (extension) {
       'pdf' => 'application/pdf',
       'png' => 'image/png',
@@ -3032,6 +4157,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => documentBusy = true);
     final description = TextEditingController();
     var kind = 'other';
+    // Confirma a classificação e a descrição antes de enviar o arquivo à API.
     final shouldSend = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -3092,7 +4218,7 @@ class _HomeScreenState extends State<HomeScreen> {
           kind: kind,
           description:
               description.text.trim().isEmpty ? null : description.text.trim());
-      await load();
+      await load(); // A guarda pode descartar a recarga; a confirmação ainda aparece (achado 28).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Documento enviado com sucesso.')));
@@ -3108,6 +4234,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre os metadados e as ações disponíveis para um documento.
   Future<void> showDocument(Map<String, dynamic> document) async {
     if (user == null) return;
     await Navigator.of(context).push(
@@ -3121,14 +4248,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Baixa o documento e abre o visualizador correspondente.
   Future<void> downloadDocument(Map<String, dynamic> document) async {
     if (user == null) return;
+    // O seletor abre antes do try e pode lançar erros fora do tipo ApiException.
     final outputPath = await FilePicker.saveFile(
         fileName: document['original_name']?.toString() ?? 'documento');
     if (outputPath == null) return;
     try {
       final bytes = await widget.api
           .downloadDocument(user!['id'] as int, document['id'] as int);
+      // Falhas de gravação local também não são convertidas em ApiException.
       await File(outputPath).writeAsBytes(bytes, flush: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3143,21 +4273,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Solicita à API a geração e o download do relatório da carteira.
   Future<void> emitInvestmentReport() async {
     if (user == null) return;
     setState(() => investmentReportBusy = true);
     try {
-      final bytes = await widget.api
-          .downloadInvestmentReport(user!['id'] as int);
-      final outputPath = await FilePicker.saveFile(
-        fileName: 'relatorio-carteira-talentum.pdf',
-        bytes: Uint8List.fromList(bytes),
-      );
-      if (outputPath != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Relatório salvo em $outputPath.')),
+      final bytes =
+          await widget.api.downloadInvestmentReport(user!['id'] as int);
+      if (mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => InvestmentReportPreviewScreen(bytes: bytes),
+          ),
         );
       }
+      // A prévia só é aberta depois que a API devolve os bytes do PDF.
     } on ApiException catch (exception) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3169,6 +4299,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre os detalhes ou o conteúdo de um relatório selecionado.
   Future<void> openReport(Map<String, dynamic> report) async {
     await showDialog<void>(
       context: context,
@@ -3198,6 +4329,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Solicita confirmação antes de remover o item identificado.
   Future<bool> confirmRemoval(String label) async {
     return await showDialog<bool>(
           context: context,
@@ -3217,6 +4349,7 @@ class _HomeScreenState extends State<HomeScreen> {
         false;
   }
 
+  /// Edita o patrimônio e converte campos opcionais vazios em `null` no payload.
   Future<void> editPatrimony(Map<String, dynamic> item) async {
     final category = TextEditingController(text: item['category'].toString());
     final description =
@@ -3270,7 +4403,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Cancelar')),
           FilledButton(
             onPressed: () {
+              // Valida o patrimônio e devolve ao formulário os campos normalizados.
               final parsedValue = parseBrazilianNumber(value.text);
+              // Os schemas também impõem comprimentos mínimos e máximos não espelhados por estes campos (achado 129).
               if (category.text.trim().isEmpty ||
                   description.text.trim().isEmpty) {
                 showFormError('Preencha categoria e descrição.');
@@ -3304,7 +4439,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await widget.api
           .updatePatrimony(user!['id'] as int, item['id'] as int, result);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, o feedback pode vir sem atualizar a lista (achado 28).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Patrimônio atualizado.')));
@@ -3317,11 +4452,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Confirma e solicita a exclusão de um item patrimonial.
   Future<void> deletePatrimony(Map<String, dynamic> item) async {
     if (!await confirmRemoval('este item patrimonial') || user == null) return;
     try {
       await widget.api.deletePatrimony(user!['id'] as int, item['id'] as int);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, a lista permanece desatualizada (achado 28).
     } on ApiException catch (exception) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -3330,6 +4466,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Cria um item patrimonial após validar categoria, descrição e valor.
   Future<void> addPatrimony() async {
     final category = TextEditingController();
     final description = TextEditingController();
@@ -3381,6 +4518,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () {
               final parsedValue = parseBrazilianNumber(value.text);
+              // Valida o patrimônio novo antes de devolver os campos normalizados.
               if (category.text.trim().isEmpty ||
                   description.text.trim().isEmpty) {
                 showFormError('Preencha categoria e descrição.');
@@ -3413,7 +4551,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result == null || user == null) return;
     try {
       await widget.api.createPatrimony(user!['id'] as int, result);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, o feedback pode vir sem atualizar a lista (achado 28).
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Patrimônio adicionado.')));
@@ -3426,6 +4564,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Cria uma meta e envia o prazo opcional como data civil em formato ISO.
   Future<void> addGoal() async {
     final title = TextEditingController();
     final target = TextEditingController();
@@ -3456,6 +4595,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   labelText: 'Prazo (opcional)',
                   suffixIcon: Icon(Icons.calendar_today_outlined)),
               onTap: () async {
+                // Escolhe o prazo como data civil e armazena sua representação ISO.
                 final date = await showDatePicker(
                     context: dialogContext,
                     firstDate: DateTime.now(),
@@ -3474,7 +4614,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Cancelar')),
           FilledButton(
             onPressed: () {
+              // Confere o título e o valor-alvo antes de devolver a meta ao formulário.
               final parsedTarget = parseBrazilianNumber(target.text);
+              // Um título não vazio ainda pode ser menor que o mínimo aceito pelo schema (achado 129).
               if (title.text.trim().isEmpty) {
                 showFormError('Informe o título da meta.');
                 return;
@@ -3500,7 +4642,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result == null || user == null) return;
     try {
       await widget.api.createGoal(user!['id'] as int, result);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, o feedback pode vir sem atualizar a lista (achado 28).
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Meta adicionada.')));
@@ -3513,6 +4655,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Atualiza valores, prazo opcional e estado da meta em um payload completo.
   Future<void> editGoal(Map<String, dynamic> goal) async {
     final title = TextEditingController(text: goal['title'].toString());
     final target = TextEditingController(
@@ -3556,6 +4699,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   labelText: 'Prazo (opcional)',
                   suffixIcon: Icon(Icons.calendar_today_outlined)),
               onTap: () async {
+                // Seleciona o prazo existente e o mantém como data civil ISO no formulário.
                 final date = await showDatePicker(
                     context: dialogContext,
                     firstDate: DateTime(2000),
@@ -3586,6 +4730,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('Cancelar')),
           FilledButton(
             onPressed: () {
+              // Valida os valores editados e devolve o estado completo da meta.
               final parsedTarget = parseBrazilianNumber(target.text);
               final parsedCurrent = parseBrazilianNumber(current.text);
               if (title.text.trim().isEmpty) {
@@ -3620,7 +4765,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await widget.api
           .updateGoal(user!['id'] as int, goal['id'] as int, result);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, o feedback pode vir sem atualizar a lista (achado 28).
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Meta atualizada.')));
@@ -3633,11 +4778,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Confirma e solicita a exclusão da meta selecionada.
   Future<void> deleteGoal(Map<String, dynamic> goal) async {
     if (!await confirmRemoval('esta meta') || user == null) return;
     try {
       await widget.api.deleteGoal(user!['id'] as int, goal['id'] as int);
-      await load();
+      await load(); // A API já confirmou; se outra carga estiver ativa, a lista permanece desatualizada (achado 28).
     } on ApiException catch (exception) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -3646,6 +4792,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Permite atualizar renda, despesas e perfil de risco.
   Future<void> editFinancialProfile() async {
     final income = TextEditingController(
       text: formatBrazilianNumber(financialProfile?['monthly_income'] ?? 0),
@@ -3686,6 +4833,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 10),
+              // Aceita texto livre, enquanto a API limita só o tamanho e não valida códigos canônicos (achado 139).
               TextField(
                 controller: risk,
                 decoration: const InputDecoration(
@@ -3702,6 +4850,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           FilledButton(
             onPressed: () {
+              // Valida renda e despesas e normaliza o perfil de risco opcional.
               final parsedIncome = parseBrazilianNumber(income.text);
               final parsedExpenses = parseBrazilianNumber(expenses.text);
               if (parsedIncome == null ||
@@ -3744,6 +4893,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Abre o formulário para editar os dados cadastrais do cliente.
   Future<void> editClientProfile() async {
     final name = TextEditingController(text: user?['name']?.toString() ?? '');
     final phone = TextEditingController(
@@ -3835,6 +4985,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           FilledButton(
             onPressed: () {
+              // Valida o nome e converte campos cadastrais opcionais vazios em nulos.
               if (name.text.trim().length < 2) {
                 showFormError('Informe seu nome completo.');
                 return;
@@ -3892,13 +5043,19 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Encerra a sessão e retorna à tela de autenticação.
   Future<void> signOut() async {
     try {
       await widget.api.logout();
     } catch (_) {
+      // Mesmo sem resposta da API, invalida a credencial local para concluir a saída.
       widget.api.accessToken = null;
     }
-    await widget.api.secureStorage.delete(clientCacheKey);
+    try {
+      await widget.api.secureStorage.delete(clientCacheKey);
+    } catch (_) {
+      // A navegação para login também protege a sessão se o dispositivo negar a limpeza do cache.
+    }
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => LoginScreen(api: widget.api)),
@@ -3906,6 +5063,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Envia a nova senha e, após sucesso, encerra a sessão e remove o cache local.
   Future<void> changePassword() async {
     final current = TextEditingController();
     final next = TextEditingController();
@@ -3944,6 +5102,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           FilledButton(
             onPressed: () {
+              // Valida as senhas e confirma a repetição antes de devolver os valores.
+              // O schema também limita a 128 caracteres; esta checagem local só aplica o mínimo.
               if (current.text.length < 8 || next.text.length < 8) {
                 showFormError('As senhas devem ter pelo menos 8 caracteres.');
                 return;
@@ -3995,7 +5155,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Perfil reúne identidade, endereço, dados financeiros e preferências de segurança.
+  // Perfil reúne identidade/endereço/segurança; campos financeiros ausentes viram zero (achado 142).
+  /// Constrói a tela de perfil e suas opções de manutenção.
   Widget _profileView() {
     return Card(
       child: Padding(
@@ -4021,6 +5182,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               'Advisor: ${clientProfile?['advisor_name'] ?? 'Ainda não vinculado'}',
             ),
+            // Esta condição só controla a exibição; a API ainda restringe a edição ao Advisor/admin (achado 49).
             if (user?['role'] != 'client' &&
                 permissions?['can_edit_profile'] == true) ...[
               const SizedBox(height: 12),
@@ -4098,6 +5260,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Monta o endereço cadastrado em uma linha legível.
   String _addressLabel() {
     final profile = clientProfile;
     if (profile == null) return 'Não informado';
@@ -4117,7 +5280,66 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Exibe o relatório emitido e oferece salvar, compartilhar ou imprimir.
+class InvestmentReportPreviewScreen extends StatelessWidget {
+  const InvestmentReportPreviewScreen({super.key, required this.bytes});
+
+  final List<int> bytes;
+
+  /// Abre o seletor de destino somente quando o usuário escolhe salvar o PDF.
+  Future<void> _savePdf(BuildContext context) async {
+    try {
+      final outputPath = await FilePicker.saveFile(
+        fileName: 'relatorio-carteira-talentum.pdf',
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (outputPath != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Relatório salvo em $outputPath.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível salvar o relatório.')),
+        );
+      }
+    }
+  }
+
+  /// Mantém a prévia à vista e deixa as ações disponíveis depois da leitura.
+  @override
+  Widget build(BuildContext context) {
+    final pdfBytes = Uint8List.fromList(bytes);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Relatório da carteira'),
+        actions: [
+          IconButton(
+            tooltip: 'Salvar PDF',
+            onPressed: () => _savePdf(context),
+            icon: const Icon(Icons.download_outlined),
+          ),
+        ],
+      ),
+      body: PdfPreview(
+        build: (_) async => pdfBytes,
+        pdfFileName: 'relatorio-carteira-talentum.pdf',
+        allowSharing: true,
+        allowPrinting: true,
+        canChangeOrientation: false,
+        canChangePageFormat: false,
+        canDebug: false,
+        onError: (_, __) => const Center(
+          child: Text('Não foi possível exibir a prévia do relatório.'),
+        ),
+      ),
+    );
+  }
+}
+
 // Visualizador protegido: recebe bytes baixados pela API e escolhe o renderer adequado.
+/// Recebe os dados necessários para visualizar um documento baixado.
 class DocumentViewerScreen extends StatefulWidget {
   const DocumentViewerScreen({
     super.key,
@@ -4130,13 +5352,16 @@ class DocumentViewerScreen extends StatefulWidget {
   final int clientId;
   final Map<String, dynamic> document;
 
+  /// Cria o estado responsável pelo carregamento e pela exibição do arquivo.
   @override
   State<DocumentViewerScreen> createState() => _DocumentViewerScreenState();
 }
 
+/// Controla carregamento e apresentação do documento no visualizador.
 class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   late final Future<List<int>> documentBytes;
 
+  /// Inicializa dados e tarefas que dependem da criação do estado da tela.
   @override
   void initState() {
     super.initState();
@@ -4146,13 +5371,16 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     );
   }
 
+  /// Salva ou compartilha o arquivo aberto no visualizador.
   Future<void> saveDocument() async {
+    // A escolha do destino precede o try que trata somente falhas da API.
     final outputPath = await FilePicker.saveFile(
       fileName: widget.document['original_name']?.toString() ?? 'documento',
     );
     if (outputPath == null) return;
     try {
       final bytes = await documentBytes;
+      // Erros de gravação local não são convertidos em ApiException neste fluxo.
       await File(outputPath).writeAsBytes(bytes, flush: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4166,9 +5394,11 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     }
   }
 
+  /// Escolhe o componente de visualização conforme o conteúdo do arquivo.
   Widget contentFor(List<int> bytes) {
     final contentType = widget.document['content_type']?.toString() ?? '';
     final data = Uint8List.fromList(bytes);
+    // Sem renderizador embutido de PDF, orienta o cliente a salvar o arquivo e abri-lo no dispositivo.
     if (contentType == 'application/pdf') {
       return Center(
         child: Padding(
@@ -4198,6 +5428,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
         ),
       );
     }
+    // Habilita zoom e movimentação na prévia de imagens.
     if (contentType.startsWith('image/')) {
       return InteractiveViewer(
         minScale: 0.5,
@@ -4206,6 +5437,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
       );
     }
     if (contentType == 'text/plain') {
+      // Bytes inválidos são substituídos para manter a prévia aberta, podendo ocultar corrupção no upload.
       return SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: SelectableText(utf8.decode(data, allowMalformed: true)),
@@ -4216,6 +5448,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     );
   }
 
+  /// Exibe o documento carregado e as ações de navegação e salvamento.
   @override
   Widget build(BuildContext context) {
     final document = widget.document;
@@ -4232,6 +5465,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
       body: FutureBuilder<List<int>>(
         future: documentBytes,
         builder: (context, snapshot) {
+          // Mostra carregamento, erro de leitura ou conteúdo conforme o estado da Future.
           if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }

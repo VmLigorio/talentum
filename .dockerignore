@@ -1,11 +1,14 @@
+# Remove o histórico do Git, ambientes virtuais e caches Python do contexto enviado ao Docker.
 .git
 .venv
 **/.venv
 __pycache__
 **/__pycache__
 *.pyc
+# Exclui arquivos chamados exatamente .env; variantes com sufixo continuam fora deste padrão (achado 213).
 .env
 **/.env
+# Ignora artefatos mobile e diretórios que não são necessários para construir a imagem da API.
 mobile/.dart_tool
 mobile/build
 advisor

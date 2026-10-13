@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is on -->
+    <!-- O local_auth_android também exige um pai Theme.AppCompat neste LaunchTheme (achado 176). -->
+    <!-- Tema da janela Android durante a inicialização quando o modo escuro do sistema está ativado. -->
     <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
+        <!-- Exibe a tela de abertura até o mecanismo Flutter renderizar o primeiro quadro. -->
         <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- Mantém as barras na cor da marca e os ícones claros sobre o fundo escuro. -->
+        <item name="android:statusBarColor">#17324D</item>
+        <item name="android:navigationBarColor">#17324D</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
-    <!-- Theme applied to the Android Window as soon as the process has started.
-         This theme determines the color of the Android Window while your
-         Flutter UI initializes, as well as behind your Flutter UI while its
-         running.
-
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <!-- Define o fundo da janela enquanto a interface Flutter inicia; usado pelo embedding Android v2. -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@color/talentum_background</item>
+        <!-- Conserva o fundo escuro e o contraste das barras depois da splash. -->
+        <item name="android:statusBarColor">#17324D</item>
+        <item name="android:navigationBarColor">#17324D</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

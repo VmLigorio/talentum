@@ -13,7 +13,10 @@ from app.models import ClientPermission, ClientProfile, User
 
 
 def require_roles(*allowed_roles: str) -> Callable:
+    """Cria uma dependência FastAPI que permite somente os papéis indicados."""
+    # Fecha a lista de papéis na dependência que FastAPI avaliará em cada rota.
     def dependency(current_user: User = Depends(get_current_user)) -> User:
+        """Bloqueia a requisição quando o papel autenticado não é permitido."""
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -29,6 +32,9 @@ def can_manage_client(
     current_user: User,
     db: Session,
 ) -> bool:
+    """Verifica se a conta pode administrar ou consultar o cliente indicado."""
+    # Administradores atravessam o vínculo; assessores precisam estar atribuídos;
+    # clientes só podem acessar a própria conta.
     if current_user.role == "admin":
         return True
     if current_user.role == "advisor":
@@ -46,10 +52,11 @@ def require_client_manager(
     current_user: User,
     db: Session,
 ) -> None:
+    """Interrompe a operação sem revelar se um cliente não autorizado existe."""
     if not can_manage_client(client_id, current_user, db):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem acesso a este cliente",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cliente não encontrado",
         )
 
 
@@ -59,25 +66,27 @@ def require_edit_permission(
     current_user: User,
     db: Session,
 ) -> None:
+    """Valida acesso e permissão específica antes de permitir uma edição."""
+    # Administradores e assessores são autorizados pelo vínculo, não pelas flags do cliente.
     if current_user.role in {"admin", "advisor"}:
         require_client_manager(client_id, current_user, db)
         return
 
     if current_user.role != "client" or current_user.id != client_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não tem permissão para esta operação",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cliente não encontrado",
         )
 
-    # O próprio cliente pode completar o cadastro e enviar seus comprovantes.
-    # Alterações financeiras e patrimoniais continuam dependendo da permissão do Advisor.
+    # Esses dois campos não são consultados nesta dependência; cada rota ainda pode impor
+    # uma restrição de papel adicional antes de chamar este helper.
     if permission_field in {"can_edit_profile", "can_upload_documents"}:
         return
 
     permissions = db.scalar(
         select(ClientPermission).where(ClientPermission.client_id == client_id)
     )
-    if permissions is None or not getattr(permissions, permission_field, False):
+    if permissions is None or not getattr(permissions, permission_field, False):  # Ausência de registro ou flag ativa nega o acesso por padrão.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Esta operação não está habilitada para o seu perfil",

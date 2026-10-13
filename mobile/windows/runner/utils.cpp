@@ -7,6 +7,7 @@
 
 #include <iostream>
 
+// Cria um console quando necessário e conecta a saída do processo ao Flutter.
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {
     FILE *unused;
@@ -21,8 +22,8 @@ void CreateAndAttachConsole() {
   }
 }
 
+// Converte cada argumento Win32 de UTF-16 para UTF-8 para o runtime Dart.
 std::vector<std::string> GetCommandLineArguments() {
-  // Convert the UTF-16 command line arguments to UTF-8 for the Engine to use.
   int argc;
   wchar_t** argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
   if (argv == nullptr) {
@@ -31,7 +32,7 @@ std::vector<std::string> GetCommandLineArguments() {
 
   std::vector<std::string> command_line_arguments;
 
-  // Skip the first argument as it's the binary name.
+  // Ignora o primeiro argumento, que contém o caminho do executável.
   for (int i = 1; i < argc; i++) {
     command_line_arguments.push_back(Utf8FromUtf16(argv[i]));
   }
@@ -41,14 +42,16 @@ std::vector<std::string> GetCommandLineArguments() {
   return command_line_arguments;
 }
 
+// Converte uma string UTF-16 terminada em nulo para UTF-8.
 std::string Utf8FromUtf16(const wchar_t* utf16_string) {
   if (utf16_string == nullptr) {
     return std::string();
   }
+  // A API retorna 0 em falha; subtrair o terminador antes de testar pode causar underflow.
   unsigned int target_length = ::WideCharToMultiByte(
       CP_UTF8, WC_ERR_INVALID_CHARS, utf16_string,
       -1, nullptr, 0, nullptr, nullptr)
-    -1; // remove the trailing null character
+    -1; // Remove o terminador nulo do tamanho convertido.
   int input_length = (int)wcslen(utf16_string);
   std::string utf8_string;
   if (target_length == 0 || target_length > utf8_string.max_size()) {

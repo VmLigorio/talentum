@@ -1,6 +1,7 @@
 # Talentum — docker-compose.yml
 # Responsabilidade: define os serviços do ambiente local e suas conexões.
 services:
+  # Banco local persistente usado pela API durante o desenvolvimento.
   postgres:
     image: postgres:16-alpine
     container_name: talentum-postgres
@@ -19,6 +20,7 @@ services:
       timeout: 5s
       retries: 10
 
+  # Armazenamento auxiliar compartilhado para limites de autenticação.
   redis:
     image: redis:7.4-alpine
     container_name: talentum-redis
@@ -32,6 +34,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # Serviço de varredura antivírus opcional para documentos enviados.
   clamav:
     image: clamav/clamav:1.4.6
     container_name: talentum-clamav
@@ -39,6 +42,7 @@ services:
     volumes:
       - talentum_clamavdata:/var/lib/clamav
 
+  # Backend exposto na porta 8001 do host para o app e o painel Advisor.
   api:
     build:
       context: .
@@ -46,6 +50,7 @@ services:
     restart: unless-stopped
     ports:
       - "8001:8000"
+    # Valores locais para banco, sessão e permissões de chamadas entre Advisor e API.
     environment:
       DATABASE_URL: postgresql+psycopg://talentum_user:talentum_dev_password@postgres:5432/talentum
       ENVIRONMENT: development
@@ -53,6 +58,7 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 14
       CORS_ORIGINS: http://127.0.0.1:8000,http://localhost:8000,http://127.0.0.1:8080,http://localhost:8080
+      # Provedores e intervalos de atualização usados pelas consultas de mercado.
       BRAPI_BASE_URL: https://brapi.dev
       BRAPI_TOKEN: ${BRAPI_TOKEN:-}
       YAHOO_FINANCE_BASE_URL: https://query1.finance.yahoo.com
@@ -61,6 +67,7 @@ services:
       MARKET_CACHE_TTL_SECONDS: 60
       MARKET_ALERT_CHECK_INTERVAL_SECONDS: 300
       PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS: 3600
+      # Documentação habilitada no ambiente local; Redis e antivírus são opcionais.
       API_DOCS_ENABLED: "true"
       REDIS_URL: redis://redis:6379/0
       REDIS_REQUIRED: "false"
@@ -78,6 +85,7 @@ services:
       redis:
         condition: service_healthy
 
+# Persiste banco, contador Redis e assinaturas do antivírus entre recriações.
 volumes:
   talentum_pgdata:
   talentum_redisdata:

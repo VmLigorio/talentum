@@ -14,11 +14,13 @@ from app.services.notifications import create_client_notification
 
 
 def _price_reached(alert: MarketAlert, price: float) -> bool:
+    """Compara a cotação com o alvo conforme a direção configurada."""
     target = float(alert.target_price)
     return price <= target if alert.condition == "at_or_below" else price >= target
 
 
 def sync_market_alerts_for_client(client_id: int, db: Session) -> tuple[int, int, bool]:
+    """Atualiza alertas de um cliente e cria avisos quando os alvos são atingidos."""
     alerts = list(
         db.scalars(
             select(MarketAlert).where(
@@ -54,6 +56,7 @@ def sync_market_alerts_for_client(client_id: int, db: Session) -> tuple[int, int
         triggered += 1
         changed = True
         direction = "atingiu ou caiu abaixo de" if alert.condition == "at_or_below" else "atingiu ou superou"
+        # A listagem HTTP e o monitor periódico podem atingir este mesmo alerta juntos (achado 53).
         create_client_notification(
             db,
             client_id=client_id,
@@ -69,15 +72,18 @@ def sync_market_alerts_for_client(client_id: int, db: Session) -> tuple[int, int
 
 
 def sync_market_alerts_for_user(user: User, db: Session) -> tuple[int, int, bool]:
+    """Sincroniza alertas do cliente, dos clientes atribuídos ou de todos."""
     if user.role == "client":
         client_ids = [user.id]
     elif user.role == "advisor":
+        # Cada GET /notifications do Advisor também consulta alertas dos clientes atribuídos.
         client_ids = list(
             db.scalars(
                 select(ClientProfile.user_id).where(ClientProfile.advisor_id == user.id)
             ).all()
         )
     else:
+        # O GET /notifications do administrador varre todos os clientes, embora os avisos sejam enviados a cliente/Advisor.
         client_ids = list(db.scalars(select(User.id).where(User.role == "client")).all())
 
     checked = 0
@@ -92,6 +98,7 @@ def sync_market_alerts_for_user(user: User, db: Session) -> tuple[int, int, bool
 
 
 def sync_all_market_alerts(db: Session) -> tuple[int, int, bool]:
+    """Atualiza alertas ativos de todos os clientes que possuem algum."""
     client_ids = list(
         db.scalars(
             select(MarketAlert.client_id)

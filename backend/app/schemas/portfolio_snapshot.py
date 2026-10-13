@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class PortfolioSnapshotResponse(BaseModel):
+    """Fotografia da carteira exposta para consultas e gráficos históricos."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

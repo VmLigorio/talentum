@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvestmentTransactionCreate(BaseModel):
+    """Dados necessários para registrar uma operação na carteira."""
+
     operation_type: Literal["buy", "sell"]
     symbol: str = Field(min_length=1, max_length=32)
     name: str | None = Field(default=None, max_length=160)
@@ -21,10 +23,14 @@ class InvestmentTransactionCreate(BaseModel):
 
 
 class InvestmentTransactionVoid(BaseModel):
+    """Motivo informado ao cancelar logicamente uma operação."""
+
     reason: str = Field(min_length=10, max_length=500)
 
 
 class InvestmentTransactionResponse(BaseModel):
+    """Operação serializada para consulta no histórico do cliente."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

@@ -8,30 +8,26 @@
 #include "flutter/generated_plugin_registrant.h"
 
 struct _MyApplication {
+  // Estado-base exigido pelo ciclo de vida da aplicação GTK.
   GtkApplication parent_instance;
+  // Argumentos preservados para entregar ao ponto de entrada Dart.
   char** dart_entrypoint_arguments;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-// Called when first Flutter frame received.
+// Exibe a janela GTK assim que o Flutter conclui o primeiro quadro visual.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
-// Implements GApplication::activate.
+// Cria a janela desktop e conecta nela a interface Flutter e os plugins.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
+  // Prefere a barra de cabeçalho no GNOME e adapta o título aos demais gerenciadores.
   gboolean use_header_bar = TRUE;
 #ifdef GDK_WINDOWING_X11
   GdkScreen* screen = gtk_window_get_screen(window);
@@ -52,6 +48,7 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "talentum_mobile");
   }
 
+  // Define o tamanho inicial da janela desktop antes de o usuário redimensioná-la.
   gtk_window_set_default_size(window, 1280, 720);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
@@ -60,30 +57,30 @@ static void my_application_activate(GApplication* application) {
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
+  // Usa um fundo opaco de reserva enquanto a superfície Flutter prepara o primeiro quadro.
   gdk_rgba_parse(&background_color, "#000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
-  // Show the window when Flutter renders.
-  // Requires the view to be realized so we can start rendering.
+  // Aguarda a primeira renderização Flutter antes de exibir a janela.
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
 
+  // Associa ao mecanismo os plugins necessários antes de iniciar a interface Flutter.
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
-// Implements GApplication::local_command_line.
+// Registra a aplicação e inicia a janela com os argumentos recebidos.
+// O retorno TRUE indica que o callback tratou a linha de comando e definiu exit_status.
 static gboolean my_application_local_command_line(GApplication* application,
                                                   gchar*** arguments,
                                                   int* exit_status) {
   MyApplication* self = MY_APPLICATION(application);
-  // Strip out the first argument as it is the binary name.
+  // Remove o nome do executável e preserva os argumentos do ponto de entrada Dart.
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
 
   g_autoptr(GError) error = nullptr;
@@ -99,31 +96,24 @@ static gboolean my_application_local_command_line(GApplication* application,
   return TRUE;
 }
 
-// Implements GApplication::startup.
+// Encaminha a inicialização ao ciclo de vida padrão do GTK.
 static void my_application_startup(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application startup.
-
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
 }
 
-// Implements GApplication::shutdown.
+// Encaminha o encerramento ao ciclo de vida padrão do GTK.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
-
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }
 
-// Implements GObject::dispose.
+// Libera os argumentos Dart próprios da instância antes de descartar o objeto.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
+// Conecta os métodos de ciclo de vida GTK às implementações desta aplicação.
 static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
   G_APPLICATION_CLASS(klass)->local_command_line =
@@ -133,13 +123,12 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
+// Inicializa a instância sem estado adicional além dos campos zerados pelo GObject.
 static void my_application_init(MyApplication* self) {}
 
+// Cria a aplicação GTK com o identificador configurado para a plataforma.
 MyApplication* my_application_new() {
-  // Set the program name to the application ID, which helps various systems
-  // like GTK and desktop environments map this running application to its
-  // corresponding .desktop file. This ensures better integration by allowing
-  // the application to be recognized beyond its binary name.
+  // Associa o processo ao identificador usado pelos ambientes de desktop.
   g_set_prgname(APPLICATION_ID);
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
